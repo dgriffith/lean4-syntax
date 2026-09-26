@@ -11,6 +11,12 @@
 //! again: they parse without error, so they would otherwise make a file look
 //! clean while its structure went unrecognised.
 //!
+//! Read that list with one caveat. The fallback needs only a leading
+//! identifier, so a fragment left by an earlier failure can be absorbed as a
+//! "command" — seeing `rw`, `simp` or a bare type name in the ranking means a
+//! cascade, not a command mathlib actually defines. Names like `alias`,
+//! `run_cmd` and `termination_by` are the real entries.
+//!
 //! Two further breakdowns separate causes from symptoms. Recovery resumes at
 //! the next top-level token, so one unsupported construct leaves a trail of
 //! fragments behind it; ranking only the *first* failure in each file
