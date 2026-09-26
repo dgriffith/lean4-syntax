@@ -1,0 +1,532 @@
+//! The command grammar: everything that can appear at the top level of a file.
+//!
+//! Declarations (`def`, `theorem`, `structure`, `inductive`, …) are fully
+//! structured. Commands that *extend the grammar* — `notation`, `syntax`,
+//! `macro_rules` — are recognised and their bodies retained as token runs
+//! rather than interpreted, which is the boundary of the chosen scope: the file
+//! still round-trips and the declaration is still visible in the tree, but the
+//! new notation does not become available to the term parser.
+
+use super::Grammar;
+use super::support::*;
+use super::term::{binders_opt, bracket_binder, match_alts, type_spec};
+use crate::kind::SyntaxKind::{self, *};
+use crate::syntax::Frag;
+use chumsky::prelude::*;
+
+/// True if this token can begin a top-level command.
+///
+/// Used by error recovery to find the next place worth resuming from.
+pub fn is_command_start(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        KW_IMPORT
+            | KW_PRELUDE
+            | KW_OPEN
+            | KW_NAMESPACE
+            | KW_SECTION
+            | KW_END
+            | KW_VARIABLE
+            | KW_VARIABLES
+            | KW_UNIVERSE
+            | KW_SET_OPTION
+            | KW_ATTRIBUTE
+            | KW_DEF
+            | KW_THEOREM
+            | KW_LEMMA
+            | KW_ABBREV
+            | KW_EXAMPLE
+            | KW_INSTANCE
+            | KW_AXIOM
+            | KW_OPAQUE
+            | KW_STRUCTURE
+            | KW_CLASS
+            | KW_INDUCTIVE
+            | KW_MUTUAL
+            | KW_NOTATION
+            | KW_INFIX
+            | KW_INFIXL
+            | KW_INFIXR
+            | KW_PREFIX
+            | KW_POSTFIX
+            | KW_MACRO
+            | KW_MACRO_RULES
+            | KW_SYNTAX
+            | KW_ELAB
+            | KW_ELAB_RULES
+            | KW_DECLARE_SYNTAX_CAT
+            | KW_INITIALIZE
+            | KW_BUILTIN_INITIALIZE
+            | KW_PRIVATE
+            | KW_PROTECTED
+            | KW_PARTIAL
+            | KW_UNSAFE
+            | KW_NONCOMPUTABLE
+            | KW_LOCAL
+            | KW_SCOPED
+            | DOC_COMMENT
+            | MOD_DOC_COMMENT
+            | AT
+            | HASH
+    )
+}
+
+/// Stops a raw run at `in`, for the `open X in <command>` form.
+fn stops_at_in(kind: SyntaxKind) -> bool {
+    kind == KW_IN
+}
+
+/// Never stops; the run ends only at a dedent.
+fn never(_: SyntaxKind) -> bool {
+    false
+}
+
+/// Stops at a comma, for attribute lists.
+fn stops_at_comma(kind: SyntaxKind) -> bool {
+    kind == COMMA
+}
+
+/// The command parser.
+pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
+    let term = g.term.clone();
+    let cmd = g.command.clone();
+
+    // ---- Declaration prologue ---------------------------------------------
+
+    // `@[simp, to_additive (attr := simp)]`
+    let attr_list = node(
+        ATTR_LIST,
+        group((
+            tok(AT),
+            tok(L_BRACKET),
+            sep_list(
+                node(ATTR, balanced_run(RAW_TOKENS, stops_at_comma, false)),
+                COMMA,
+            ),
+            tok(R_BRACKET),
+        )),
+    );
+
+    let modifiers = node(
+        DECL_MODIFIERS,
+        group((
+            tok(DOC_COMMENT).or_not(),
+            attr_list.clone().or_not(),
+            tok_in(&[
+                KW_PRIVATE,
+                KW_PROTECTED,
+                KW_NONCOMPUTABLE,
+                KW_UNSAFE,
+                KW_PARTIAL,
+                KW_LOCAL,
+                KW_SCOPED,
+            ])
+            .repeated()
+            .collect::<Vec<_>>(),
+        )),
+    );
+
+    // `foo.{u, v}`
+    let decl_id = node(
+        DECL_ID,
+        group((
+            tok(IDENT),
+            group((
+                adjacent_tok(DOT),
+                tok(L_BRACE),
+                sep_list(tok(IDENT), COMMA),
+                tok(R_BRACE),
+            ))
+            .or_not(),
+        )),
+    );
+
+    let decl_sig = node(DECL_SIG, group((binders_opt(g), type_spec(g).or_not())));
+
+    let deriving = node(
+        DERIVING_CLAUSE,
+        group((tok(KW_DERIVING), sep_list(tok(IDENT), COMMA))),
+    );
+
+    // `where` in value position: `instance : Monad M where pure := …`
+    let where_field = node(
+        STRUCT_INST_FIELD,
+        group((
+            tok(IDENT),
+            binders_opt(g),
+            type_spec(g).or_not(),
+            tok(COLON_EQ),
+            term.clone(),
+        )),
+    );
+
+    // The right-hand side of a declaration, in its three forms.
+    let decl_body = choice((
+        node(DECL_BODY, group((tok(COLON_EQ), term.clone()))),
+        node(
+            DECL_BODY,
+            group((
+                tok(KW_WHERE),
+                layout_block(STRUCT_FIELD_LIST, where_field.clone(), &[], true),
+            )),
+        ),
+        // Pattern-matching equations: `def f : Nat → Nat | 0 => 1 | n+1 => n`
+        node(DECL_EQNS, match_alts(g)),
+    ))
+    .boxed();
+
+    // `where` after a body, introducing auxiliary declarations.
+    let where_decl = node(
+        DEF,
+        group((decl_id.clone(), decl_sig.clone(), decl_body.clone())),
+    );
+    let where_clause = node(
+        WHERE_CLAUSE,
+        group((
+            tok(KW_WHERE),
+            layout_block(WHERE_DECLS, where_decl, &[SEMICOLON], true),
+        )),
+    );
+
+    // ---- Declarations ------------------------------------------------------
+
+    let named_decl = |kw: &'static [SyntaxKind], kind: SyntaxKind| {
+        node(
+            kind,
+            group((
+                modifiers.clone(),
+                tok_in(kw),
+                decl_id.clone(),
+                decl_sig.clone(),
+                decl_body.clone().or_not(),
+                where_clause.clone().or_not(),
+                deriving.clone().or_not(),
+            )),
+        )
+    };
+
+    let def_decl = named_decl(&[KW_DEF], DEF);
+    let theorem_decl = named_decl(&[KW_THEOREM, KW_LEMMA], THEOREM);
+    let abbrev_decl = named_decl(&[KW_ABBREV], ABBREV);
+    let axiom_decl = named_decl(&[KW_AXIOM], AXIOM);
+    let opaque_decl = named_decl(&[KW_OPAQUE], OPAQUE_DECL);
+
+    // `example` has no name; `instance` may omit one.
+    let example_decl = node(
+        EXAMPLE,
+        group((
+            modifiers.clone(),
+            tok(KW_EXAMPLE),
+            decl_sig.clone(),
+            decl_body.clone(),
+        )),
+    );
+
+    let instance_decl = node(
+        INSTANCE,
+        group((
+            modifiers.clone(),
+            tok(KW_INSTANCE),
+            // An optional priority, `instance (priority := 100) …`.
+            group((
+                tok(L_PAREN),
+                balanced_run(RAW_TOKENS, never, true),
+                tok(R_PAREN),
+            ))
+            .or_not(),
+            decl_id.clone().or_not(),
+            decl_sig.clone(),
+            decl_body.clone().or_not(),
+            where_clause.clone().or_not(),
+        )),
+    );
+
+    // ---- Structures, classes, inductives ----------------------------------
+
+    let struct_field = node(
+        STRUCT_FIELD,
+        group((
+            tok(DOC_COMMENT).or_not(),
+            choice((
+                bracket_binder(g),
+                node(
+                    SIMPLE_BINDER,
+                    group((
+                        tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+                        type_spec(g),
+                        group((tok(COLON_EQ), term.clone())).or_not(),
+                    )),
+                ),
+            )),
+        )),
+    );
+
+    let extends_clause = node(
+        EXTENDS_CLAUSE,
+        group((tok(KW_EXTENDS), sep_list(term.clone(), COMMA))),
+    );
+
+    let structure_decl = node(
+        STRUCTURE,
+        group((
+            modifiers.clone(),
+            tok_in(&[KW_STRUCTURE]),
+            decl_id.clone(),
+            binders_opt(g),
+            extends_clause.clone().or_not(),
+            type_spec(g).or_not(),
+            group((
+                tok(KW_WHERE),
+                // The constructor may be named: `where mk ::`
+                group((tok(IDENT), tok(DOUBLE_COLON))).or_not(),
+                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[], true).or_not(),
+            ))
+            .or_not(),
+            deriving.clone().or_not(),
+        )),
+    );
+
+    // A `class` is a structure, except that `class inductive` also exists.
+    let class_decl = node(
+        CLASS_DECL,
+        group((
+            modifiers.clone(),
+            tok(KW_CLASS),
+            tok(KW_INDUCTIVE).or_not(),
+            decl_id.clone(),
+            binders_opt(g),
+            extends_clause.or_not(),
+            type_spec(g).or_not(),
+            group((
+                tok(KW_WHERE),
+                group((tok(IDENT), tok(DOUBLE_COLON))).or_not(),
+                layout_block(STRUCT_FIELD_LIST, struct_field, &[], true).or_not(),
+            ))
+            .or_not(),
+            deriving.clone().or_not(),
+        )),
+    );
+
+    let ctor = node(
+        CTOR,
+        group((
+            tok(PIPE),
+            tok(DOC_COMMENT).or_not(),
+            tok(IDENT),
+            binders_opt(g),
+            type_spec(g).or_not(),
+        )),
+    );
+
+    let inductive_decl = node(
+        INDUCTIVE,
+        group((
+            modifiers.clone(),
+            tok(KW_INDUCTIVE),
+            decl_id.clone(),
+            binders_opt(g),
+            type_spec(g).or_not(),
+            tok(KW_WHERE).or_not(),
+            layout_block(CTOR_LIST, ctor, &[], false).or_not(),
+            deriving.clone().or_not(),
+        )),
+    );
+
+    // ---- Plain commands ----------------------------------------------------
+
+    let module_doc = node(MODULE_DOC, tok(MOD_DOC_COMMENT));
+
+    let import = node(
+        IMPORT,
+        group((
+            tok(KW_PRELUDE).or_not(),
+            tok(KW_IMPORT),
+            tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+        )),
+    );
+
+    // `open Foo Bar (baz) in <command>`
+    let open_cmd = node(
+        OPEN_CMD,
+        group((
+            tok_in(&[KW_LOCAL, KW_SCOPED])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(KW_OPEN),
+            balanced_run(RAW_TOKENS, stops_at_in, false),
+            group((tok(KW_IN), cmd.clone())).or_not(),
+        )),
+    );
+
+    let namespace = node(NAMESPACE, group((tok(KW_NAMESPACE), tok(IDENT))));
+    let section = node(SECTION, group((tok(KW_SECTION), tok(IDENT).or_not())));
+    let end_cmd = node(END_CMD, group((tok(KW_END), tok(IDENT).or_not())));
+
+    let variable_cmd = node(
+        VARIABLE_CMD,
+        group((
+            tok_in(&[KW_VARIABLE, KW_VARIABLES]),
+            bracket_binder(g).repeated().at_least(1).collect::<Vec<_>>(),
+        )),
+    );
+
+    let universe_cmd = node(
+        UNIVERSE_CMD,
+        group((
+            tok(KW_UNIVERSE),
+            tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+        )),
+    );
+
+    // `set_option trace.foo true in <command>`
+    let set_option_cmd = node(
+        SET_OPTION_CMD,
+        group((
+            tok(KW_SET_OPTION),
+            tok(IDENT),
+            balanced_run(RAW_TOKENS, stops_at_in, false),
+            group((tok(KW_IN), cmd.clone())).or_not(),
+        )),
+    );
+
+    let attribute_cmd = node(
+        ATTRIBUTE_CMD,
+        group((
+            tok_in(&[KW_LOCAL, KW_SCOPED])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(KW_ATTRIBUTE),
+            tok(L_BRACKET),
+            sep_list(
+                node(ATTR, balanced_run(RAW_TOKENS, stops_at_comma, false)),
+                COMMA,
+            ),
+            tok(R_BRACKET),
+            tok(IDENT).repeated().collect::<Vec<_>>(),
+        )),
+    );
+
+    // `#check`, `#eval`, `#print`, …
+    let hash_cmd = node(
+        HASH_CMD,
+        group((
+            tok(HASH),
+            tok(IDENT).or_not(),
+            balanced_run(RAW_TOKENS, never, true),
+        )),
+    );
+
+    // ---- Grammar-extending commands (recorded, not applied) ----------------
+
+    // `infixl:65 " ⊕ " => Sum`
+    let precedence = node(PRECEDENCE, group((tok(COLON), tok(NUMBER))));
+
+    let mixfix_cmd = node(
+        MIXFIX_CMD,
+        group((
+            tok_in(&[KW_LOCAL, KW_SCOPED])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok_in(&[KW_INFIX, KW_INFIXL, KW_INFIXR, KW_PREFIX, KW_POSTFIX]),
+            precedence.clone().or_not(),
+            attr_list.clone().or_not(),
+            balanced_run(RAW_TOKENS, never, true),
+        )),
+    );
+
+    let notation_cmd = node(
+        NOTATION_CMD,
+        group((
+            tok_in(&[KW_LOCAL, KW_SCOPED])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(KW_NOTATION),
+            precedence.or_not(),
+            balanced_run(RAW_TOKENS, never, true),
+        )),
+    );
+
+    // The remaining metaprogramming commands share a shape: a keyword followed
+    // by syntax this parser deliberately does not interpret.
+    let meta_cmd = |kw: &'static [SyntaxKind], kind: SyntaxKind| {
+        node(
+            kind,
+            group((
+                tok_in(&[KW_LOCAL, KW_SCOPED])
+                    .repeated()
+                    .collect::<Vec<_>>(),
+                tok_in(kw),
+                balanced_run(RAW_TOKENS, never, true),
+            )),
+        )
+    };
+
+    let syntax_cmd = meta_cmd(&[KW_SYNTAX], SYNTAX_CMD);
+    let macro_rules_cmd = meta_cmd(&[KW_MACRO_RULES], MACRO_RULES_CMD);
+    let macro_cmd = meta_cmd(&[KW_MACRO], MACRO_CMD);
+    let elab_cmd = meta_cmd(&[KW_ELAB, KW_ELAB_RULES], ELAB_CMD);
+    let syntax_cat_cmd = meta_cmd(&[KW_DECLARE_SYNTAX_CAT], DECLARE_SYNTAX_CAT_CMD);
+    let initialize_cmd = meta_cmd(&[KW_INITIALIZE, KW_BUILTIN_INITIALIZE], UNKNOWN_CMD);
+
+    // The negative lookahead matters: `end` is itself a command, so without it
+    // the inner `repeated()` would consume the `end` that closes the block and
+    // then fail at end of input.
+    let mutual_block = node(
+        MUTUAL_BLOCK,
+        group((
+            tok(KW_MUTUAL),
+            tok(KW_END)
+                .not()
+                .ignore_then(cmd.clone())
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(KW_END),
+        )),
+    );
+
+    let declarations = choice((
+        def_decl,
+        theorem_decl,
+        abbrev_decl,
+        axiom_decl,
+        opaque_decl,
+        example_decl,
+        instance_decl,
+        structure_decl,
+        class_decl,
+        inductive_decl,
+    ))
+    .boxed();
+
+    let simple_commands = choice((
+        module_doc,
+        import,
+        open_cmd,
+        namespace,
+        section,
+        end_cmd,
+        variable_cmd,
+        universe_cmd,
+        set_option_cmd,
+        attribute_cmd,
+        hash_cmd,
+        mutual_block,
+    ))
+    .boxed();
+
+    let meta_commands = choice((
+        mixfix_cmd,
+        notation_cmd,
+        syntax_cmd,
+        macro_rules_cmd,
+        macro_cmd,
+        elab_cmd,
+        syntax_cat_cmd,
+        initialize_cmd,
+    ))
+    .boxed();
+
+    // Declarations are tried first: they are the only forms that begin with
+    // modifiers, and `@[…]` or `private` must not be mistaken for anything else.
+    choice((declarations, simple_commands, meta_commands)).boxed()
+}

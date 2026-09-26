@@ -1,0 +1,79 @@
+/-! # A module docstring -/
+import Lean.Data.HashMap
+import Std
+
+namespace Demo
+
+universe u v
+
+variable {α : Type u} [Inhabited α]
+
+/-- A binary tree. -/
+inductive Tree (α : Type u) where
+  | leaf
+  | node (l : Tree α) (v : α) (r : Tree α)
+  deriving Repr, BEq
+
+structure Point where
+  x : Float := 0.0
+  y : Float := 0.0
+  deriving Inhabited
+
+class Container (f : Type u → Type v) where
+  empty : f α
+  insert : α → f α → f α
+
+@[simp]
+theorem add_zero (n : Nat) : n + 0 = n := by
+  induction n with
+  | zero => rfl
+  | succ k ih =>
+    simp [Nat.add_succ, ih]
+
+private def size : Tree α → Nat
+  | .leaf => 0
+  | .node l _ r => size l + size r + 1
+
+def Tree.mirror : Tree α → Tree α
+  | .leaf => .leaf
+  | .node l v r => .node (mirror r) v (mirror l)
+
+theorem nested_by (p q : Prop) (hp : p) (hq : q) : p ∧ q := by
+  have hp' : p := by
+    exact hp
+  exact ⟨hp', hq⟩
+
+def sumList (xs : List Nat) : Nat :=
+  xs.foldl (fun acc x => acc + x) 0
+
+def main : IO Unit := do
+  let mut total := 0
+  for i in [0:10] do
+    total := total + i
+  if total > 20 then
+    IO.println s!"big {total}"
+  else
+    IO.println "small"
+  let stdin ← IO.getStdin
+  let line ← stdin.getLine
+  IO.println line
+
+example : ∀ x : Nat, x ≤ x + 1 := fun x => Nat.le_succ x
+
+noncomputable def choice_fn : (α → Prop) → α := fun _ => default
+
+instance : Add Point where
+  add a b := ⟨a.x + b.x, a.y + b.y⟩
+
+def descr (t : Tree α) : String :=
+  match t with
+  | .leaf => "leaf"
+  | .node _ _ _ => "node"
+
+abbrev NatPred := Nat → Prop
+
+theorem calc_demo (a b c : Nat) (h1 : a = b) (h2 : b = c) : a = c :=
+  calc a = b := h1
+    _ = c := h2
+
+end Demo
