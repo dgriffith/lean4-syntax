@@ -180,7 +180,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         tok_in(&[NUMBER, SCIENTIFIC, STRING, RAW_STRING, CHAR, NAME_LIT]),
     );
     let hole = node(HOLE, tok(UNDERSCORE));
-    let synthetic_hole = node(SYNTHETIC_HOLE, group((tok(QUESTION), tok_in(&[IDENT]))));
+    // `?x` and `?_` — the latter is how `refine` marks the holes it leaves.
+    let synthetic_hole = node(
+        SYNTHETIC_HOLE,
+        group((tok(QUESTION), tok_in(&[IDENT, UNDERSCORE]))),
+    );
     let sorry = node(SORRY_TERM, tok(KW_SORRY));
     let cdot = node(CDOT_TERM, tok_in(&[CDOT, BULLET]));
     // `.mk`, `.none` — constructor names resolved from the expected type.

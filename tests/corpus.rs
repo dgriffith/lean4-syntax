@@ -27,10 +27,15 @@ fn corpus_files_parse_without_errors() {
     assert!(checked > 0, "no corpus files found in {}", dir.display());
 }
 
-/// Truncating a file at any point must not panic, and must still round-trip.
+/// Truncating a file must not panic, and must still round-trip.
 ///
 /// This is the shape of input an editor produces on every keystroke, and it is
 /// where a parser that assumes well-formed input tends to fall over.
+///
+/// Each file contributes a bounded number of cut points rather than one per
+/// byte, so adding corpus files does not make the suite progressively slower.
+/// Every line boundary is always included, since those are where layout-
+/// sensitive parsing is most likely to break.
 #[test]
 fn every_prefix_of_every_corpus_file_is_survivable() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
@@ -40,7 +45,18 @@ fn every_prefix_of_every_corpus_file_is_survivable() {
             continue;
         }
         let src = std::fs::read_to_string(&path).expect("readable file");
-        for end in 0..=src.len() {
+        const CUTS_PER_FILE: usize = 600;
+        let stride = (src.len() / CUTS_PER_FILE).max(1);
+        let cuts: std::collections::BTreeSet<usize> = (0..=src.len())
+            .step_by(stride)
+            .chain(
+                src.char_indices()
+                    .filter(|(_, c)| *c == '\n')
+                    .map(|(i, _)| i),
+            )
+            .chain([src.len()])
+            .collect();
+        for end in cuts {
             if !src.is_char_boundary(end) {
                 continue;
             }

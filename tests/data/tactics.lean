@@ -1,0 +1,108 @@
+import Mathlib.Tactic
+
+variable {α : Type*} [DecidableEq α]
+
+theorem simp_forms (a b : Nat) (h : a = b) (h2 : b = 0) : a + 0 = b := by
+  simp only [Nat.add_zero, ← h, -h2, *] at h ⊢
+  simp_all
+  norm_num [Nat.succ_eq_add_one]
+  simp (config := { decide := true }) [h]
+  linarith [h, h2]
+  omega
+
+theorem rewrite_forms (a b c : Nat) (h1 : a = b) (h2 : b = c) : a = c := by
+  rw [h1, h2]
+  rw [← h2] at h1 ⊢
+  nth_rw 2 [h1]
+  simp_rw [← h1]
+  rwa [h1] at h2
+
+theorem term_forms (p q : Prop) (hp : p) (hpq : p → q) : q := by
+  apply hpq
+  exact hp
+
+theorem refine_holes (p q : Prop) (hp : p) (hq : q) : p ∧ q := by
+  refine ⟨?_, ?_⟩
+  · exact hp
+  · exact hq
+
+theorem intro_forms (p q : Prop) : p → q → p ∧ q := by
+  intro hp hq
+  constructor
+  case left => exact hp
+  case right => exact hq
+
+theorem rintro_patterns (p q r : Prop) : (p ∨ q) → r → r := by
+  rintro (hp | hq) hr
+  · exact hr
+  · exact hr
+
+theorem cases_forms (n : Nat) (h : n = 0 ∨ n = 1) : True := by
+  rcases h with rfl | rfl
+  · trivial
+  · trivial
+
+theorem induction_with (n : Nat) : 0 ≤ n := by
+  induction n with
+  | zero => exact Nat.le_refl 0
+  | succ k ih =>
+    exact Nat.le_succ_of_le ih
+
+theorem induction_using (xs : List Nat) : xs.length ≥ 0 := by
+  induction xs using List.rec with
+  | nil => simp
+  | cons x xs ih => simp
+
+theorem obtain_forms (h : ∃ n : Nat, n > 0) : True := by
+  obtain ⟨n, hn⟩ := h
+  obtain ⟨m, hm⟩ : ∃ m : Nat, m > 0 := ⟨1, Nat.one_pos⟩
+  trivial
+
+theorem have_forms (p : Prop) (hp : p) : p := by
+  have h1 : p := hp
+  have h2 := hp
+  have : p := hp
+  set q := p with hq
+  replace h1 : p := hp
+  suffices h3 : p from h1
+  exact h1
+
+theorem exists_forms : ∃ n : Nat, n > 0 := by
+  use 1
+  omega
+
+theorem combinator_forms (a b : Nat) : a + b = b + a ∧ True := by
+  constructor <;> simp [Nat.add_comm]
+  all_goals try simp
+  any_goals rfl
+  first
+    | exact trivial
+    | simp
+  repeat rfl
+
+theorem conv_forms (a b : Nat) (h : a = b) : a + 0 = b := by
+  conv_lhs => rw [Nat.add_zero]
+  conv at h => rw [← Nat.add_zero]
+  conv in a + 0 => rw [Nat.add_zero]
+  exact h
+
+theorem calc_tactic (a b c : Nat) (h1 : a = b) (h2 : b = c) : a = c := by
+  calc a = b := h1
+    _ = c := h2
+
+theorem show_and_change (a : Nat) : a + 0 = a := by
+  show a + 0 = a
+  change a + 0 = a
+  simp
+
+theorem nested_blocks (p q : Prop) (hp : p) (hq : q) : p ∧ q := by
+  refine ⟨?_, ?_⟩
+  · have hp' : p := by
+      exact hp
+    exact hp'
+  · exact hq
+
+theorem unknown_tactics (n : Nat) : True := by
+  my_custom_tac foo [bar] at h
+  another_one <;> trivial
+  trivial

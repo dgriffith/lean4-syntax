@@ -1,6 +1,6 @@
 //! Tests for the typed views over the tree.
 
-use lean4_syntax::ast::{AstNode, Binder, Command, Decl, HasDecl, Ref, SourceFile, Term};
+use lean4_syntax::ast::{AstNode, Binder, Command, Decl, HasDecl, Ref, SourceFile, Tactic, Term};
 
 fn file(src: &str) -> SourceFile {
     let parse = lean4_syntax::parse(src);
@@ -202,7 +202,7 @@ fn match_alternatives_expose_patterns_and_bodies() {
 }
 
 #[test]
-fn tactics_are_named_and_their_arguments_retained() {
+fn tactics_are_named_and_reachable_by_shape() {
     let f = file("theorem t : True := by\n  simp [Nat.add_comm, foo]\n  trivial\n");
     let Some(Command::Theorem(thm)) = f.commands().next() else {
         panic!()
@@ -214,19 +214,22 @@ fn tactics_are_named_and_their_arguments_retained() {
         .tactics()
         .unwrap()
         .tactics()
-        .filter_map(lean4_syntax::ast::Tactic::cast)
         .map(|t| t.name().unwrap().text().to_string())
         .collect();
     assert_eq!(names, ["simp", "trivial"]);
 
-    let first = by
-        .tactics()
-        .unwrap()
-        .tactics()
-        .next()
-        .and_then(lean4_syntax::ast::Tactic::cast)
-        .unwrap();
-    assert_eq!(first.args().unwrap().text(), "[Nat.add_comm, foo]");
+    // `simp` gets a structured shape; `trivial` takes no arguments and so needs
+    // none, falling to the generic node with its name intact.
+    let mut tactics = by.tactics().unwrap().tactics();
+    let Some(Tactic::Simp(simp)) = tactics.next() else {
+        panic!("expected a simp tactic")
+    };
+    let lemmas: Vec<String> = simp.args().map(|a| a.term().unwrap().text()).collect();
+    assert_eq!(lemmas, ["Nat.add_comm", "foo"]);
+    assert!(!simp.is_only());
+    assert!(simp.location().is_none());
+
+    assert!(matches!(tactics.next(), Some(Tactic::Generic(_))));
 }
 
 #[test]

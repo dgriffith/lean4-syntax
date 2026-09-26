@@ -143,6 +143,27 @@ pub fn any_tok<'a>() -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     any().map_with(|_, e: &mut MapExtra<'a, '_, In<'a>, Extra<'a>>| Frag::Token(e.span().start))
 }
 
+/// Strips the suffixes Lean allows on a tactic name.
+///
+/// `simp?` and `simp!` are single identifier tokens, because `?` and `!` are
+/// identifier characters in Lean, so matching a name has to ignore them.
+pub fn tactic_base_name(text: &str) -> &str {
+    text.trim_end_matches(['?', '!'])
+}
+
+/// Matches an identifier used as a tactic name, given a set of accepted names.
+///
+/// Compares against [`tactic_base_name`], so `simp?` matches `"simp"`.
+pub fn tactic_name<'a>(
+    names: &'static [&'static str],
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    any()
+        .filter(move |t: &SigToken<'a>| {
+            t.kind == SyntaxKind::IDENT && names.contains(&tactic_base_name(t.text))
+        })
+        .map_with(|_, e: &mut MapExtra<'a, '_, In<'a>, Extra<'a>>| Frag::Token(e.span().start))
+}
+
 /// Matches any single token whose kind satisfies `pred`.
 pub fn any_tok_if<'a>(
     pred: fn(SyntaxKind) -> bool,
@@ -323,7 +344,8 @@ pub fn balanced_run<'a>(
 /// a nested `by` block stop cleanly when the outer block's next tactic dedents.
 ///
 /// `require_indent` selects Lean's `colGt` (true) or `colGe` (false) rule for
-/// where the block itself may begin.
+/// where the block itself may begin. Neither permits a block starting to the
+/// left of the enclosing position.
 pub fn layout_block<'a, P>(
     kind: SyntaxKind,
     item: P,
@@ -342,10 +364,18 @@ where
                 "expected an indented block, found end of input",
             ));
         };
-        // A `by` or `do` block must be indented past its enclosing position.
-        // `match` alternatives and declaration equations must not: Lean accepts
-        // a leading `|` back at column 0 even when the `match` is mid-line.
-        if require_indent && first.col <= enclosing {
+        // A `by` or `do` block must be indented strictly past its enclosing
+        // position (`colGt`). `match` alternatives, declaration equations and
+        // `with` alternatives need only reach it (`colGe`), since Lean accepts a
+        // leading `|` level with — or back at column 0 relative to — the syntax
+        // introducing it. Neither may start *before* it: that is what stops a
+        // tactic from claiming the alternatives of an enclosing block.
+        let too_shallow = if require_indent {
+            first.col <= enclosing
+        } else {
+            first.col < enclosing
+        };
+        if too_shallow {
             return Err(Rich::custom(
                 inp.span_since(&start),
                 format!(

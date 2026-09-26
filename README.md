@@ -75,7 +75,8 @@ Covered: all commands and declaration forms (`def`, `theorem`, `structure`,
 `class`, `inductive`, `instance`, `mutual`, …) with modifiers, attributes,
 docstrings, universe binders, `where` clauses and `deriving`; the full term
 grammar with Lean's built-in precedence table; binders in all four
-explicitness forms; `match`, `do`, `calc` and `by` blocks with correct layout.
+explicitness forms; `match`, `do`, `calc` and `by` blocks with correct layout;
+and the tactic grammar described below.
 
 Deliberately not interpreted:
 
@@ -83,8 +84,43 @@ Deliberately not interpreted:
 |---|---|
 | `notation`, `infixl`, `prefix`, `postfix` | recorded as `NOTATION_CMD` / `MIXFIX_CMD`; the new syntax does **not** become available to the term parser |
 | `syntax`, `macro`, `macro_rules`, `elab` | recorded; bodies kept as `RAW_TOKENS` |
-| individual tactics | a `TACTIC` is its name plus a bracket-balanced `TACTIC_ARGS` run. Sequencing, `<;>`, focus dots, `first \| …` and `with \| alt` blocks *are* structured |
 | syntax quotations `` `(…) `` | contents kept as `RAW_TOKENS` |
+
+### Tactics
+
+Tactics are structured, which matters because they are what proof-rewriting
+tools actually manipulate. `simp only [foo, ← bar] at h ⊢` yields the `only`
+flag, three classified arguments, and a location that distinguishes hypotheses
+from the goal — not a token run to be re-lexed.
+
+There is deliberately **one node kind per shape, not per tactic name**. Lean's
+tactic vocabulary is open-ended and grows with every library, so a kind per name
+would be enormous and permanently incomplete. Instead a handful of shapes cover
+the grammar, and the name token says which tactic it is:
+
+| Shape | Covers |
+|---|---|
+| `TACTIC_SIMP` | `simp`, `simp_all`, `norm_num`, `linarith`, … — optional `only`, config, lemma list, location |
+| `TACTIC_REWRITE` | `rw`, `rewrite`, `erw`, `simp_rw`, `nth_rw` — rule lists with `←`, location |
+| `TACTIC_TERM` / `TACTIC_TERM_LIST` | `exact`, `apply`, `refine`, `specialize` / `use` |
+| `TACTIC_INTRO` | `intro`, `rintro`, `ext`, `funext` — full pattern language |
+| `TACTIC_CASES` | `cases`, `rcases`, `induction` — targets, `using`, `generalizing`, `with` |
+| `TACTIC_HAVE` | `have`, `obtain`, `set`, `suffices`, `replace` |
+| `TACTIC_CASE` / `TACTIC_CONV` / `TACTIC_SHOW` / `TACTIC_CALC` | goal naming, conversion mode, restatement, calculation |
+| `TACTIC_COMBINATOR_APP` | `try`, `repeat`, `all_goals`, `iterate n` |
+| `TACTIC_FOCUS`, `TACTIC_ALT`, `TACTIC_COMBINATOR`, `TACTIC_SEQ_BRACKETED` | `·`, `first \| …`, `<;>`, `(…)` |
+| `TACTIC` | everything else — name plus a balanced `TACTIC_ARGS` run |
+
+That last row is load-bearing rather than a gap. A tactic taking no arguments
+needs no shape (`rfl`, `trivial`), and an unfamiliar or user-defined tactic still
+parses with its arguments retained. Every structured shape also carries an
+optional trailing `TACTIC_ARGS`, so syntax a shape does not model stays attached
+to the tactic it belongs to instead of being mistaken for the next one — and a
+non-empty one is a visible signal of an unmodelled form.
+
+`rcases`/`rintro`/`obtain` patterns get their own small grammar
+(`RCASES_PAT`, `RCASES_TUPLE`, `RCASES_ALT`), covering tuples, alternations,
+`-` to clear a hypothesis and `@` to expose implicit arguments.
 
 ### Known limitations
 
@@ -97,6 +133,12 @@ Deliberately not interpreted:
   `f <| do …` — which is what keeps `for x in xs do …` parsing correctly.
 - **`a != b` needs spaces.** `!` and `?` are identifier characters in Lean, so
   `a!=b` lexes as `a!`, `=`, `b`. This matches Lean.
+- **`only`, `using` and `generalizing` are reserved.** Lean keeps one *global*
+  token table, so words introduced by tactic syntax are tokens everywhere rather
+  than identifiers that happen to appear in tactic position. Reserving them is
+  what stops `induction xs using List.rec` from reading `using` as an argument
+  of `xs`. A file using one of them as an identifier will not parse — but nor
+  would it in Lean.
 - Uncommon brace terms beyond `{x := e}`, `{s with …}`, `{x // p}`, `{x | p}`
   and `{a, b}` are not modeled.
 

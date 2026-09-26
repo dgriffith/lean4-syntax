@@ -13,6 +13,9 @@
 //!   and `Array.get!` are single identifiers — and why `a != b` needs spaces.
 //! * Block comments nest, and `/--` / `/-!` open doc comments, which are
 //!   significant tokens rather than trivia because they attach to declarations.
+//! * Words introduced by tactic syntax — `only`, `using`, `generalizing` — are
+//!   reserved words, not identifiers. Lean keeps a single global token table, so
+//!   a word used as a token anywhere is a token everywhere.
 
 use crate::kind::{KEYWORDS, SYMBOLS, SyntaxKind};
 use std::sync::LazyLock;
@@ -560,6 +563,23 @@ mod tests {
         assert_eq!(dump("`Nat.zero"), "NAME_LIT(`Nat.zero)");
         assert_eq!(dump("``foo"), "NAME_LIT(``foo)");
         assert_eq!(dump("`(x)"), "BACKTICK(`) L_PAREN(() IDENT(x) R_PAREN())");
+    }
+
+    #[test]
+    fn tactic_words_are_reserved_like_lean_reserves_them() {
+        // Lean's token table is global, so these are not identifiers. Without
+        // this, `induction xs using foo` reads `using` as an argument.
+        assert_eq!(dump("only"), "KW_ONLY(only)");
+        assert_eq!(dump("using"), "KW_USING(using)");
+        assert_eq!(dump("generalizing"), "KW_GENERALIZING(generalizing)");
+        // Only the whole word is reserved.
+        assert_eq!(dump("only_if"), "IDENT(only_if)");
+        assert_eq!(dump("Finset.sum_only"), "IDENT(Finset.sum_only)");
+    }
+
+    #[test]
+    fn turnstile_marks_the_goal_in_a_location_clause() {
+        assert_eq!(dump("⊢"), "TURNSTILE(⊢)");
     }
 
     #[test]
