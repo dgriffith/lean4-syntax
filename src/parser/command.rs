@@ -518,7 +518,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let macro_cmd = meta_cmd(&[KW_MACRO], MACRO_CMD);
     let elab_cmd = meta_cmd(&[KW_ELAB, KW_ELAB_RULES], ELAB_CMD);
     let syntax_cat_cmd = meta_cmd(&[KW_DECLARE_SYNTAX_CAT], DECLARE_SYNTAX_CAT_CMD);
-    let initialize_cmd = meta_cmd(&[KW_INITIALIZE, KW_BUILTIN_INITIALIZE], UNKNOWN_CMD);
+    let initialize_cmd = meta_cmd(&[KW_INITIALIZE, KW_BUILTIN_INITIALIZE], INITIALIZE_CMD);
 
     // The negative lookahead matters: `end` is itself a command, so without it
     // the inner `repeated()` would consume the `end` that closes the block and

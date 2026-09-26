@@ -262,7 +262,14 @@ ast_node!(
     DECLARE_SYNTAX_CAT_CMD
 );
 ast_node!(
-    /// A command the parser recognised but did not model.
+    /// `initialize` / `builtin_initialize`, whose body is not interpreted.
+    InitializeCmd,
+    INITIALIZE_CMD
+);
+ast_node!(
+    /// A command the parser does not recognise at all: its name plus a balanced
+    /// token run. Distinct from commands that are recognised but whose bodies
+    /// are deliberately left uninterpreted.
     UnknownCmd,
     UNKNOWN_CMD
 );
@@ -824,6 +831,7 @@ ast_enum!(
         Macro(MacroCmd),
         Elab(ElabCmd),
         DeclareSyntaxCat(DeclareSyntaxCat),
+        Initialize(InitializeCmd),
         Unknown(UnknownCmd),
         Error(Error),
     }

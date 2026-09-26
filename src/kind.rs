@@ -385,6 +385,7 @@ kinds! {
         MACRO_CMD,
         ELAB_CMD,
         DECLARE_SYNTAX_CAT_CMD,
+        INITIALIZE_CMD,
         RAW_TOKENS,
         // Binders.
         BINDERS,
