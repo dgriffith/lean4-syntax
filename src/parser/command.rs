@@ -21,8 +21,15 @@ pub fn is_command_start(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         KW_IMPORT
+            | KW_MODULE
+            | KW_PUBLIC
+            | KW_META
             | KW_PRELUDE
             | KW_OPEN
+            | KW_EXPORT
+            | KW_INCLUDE
+            | KW_OMIT
+            | KW_NONREC
             | KW_NAMESPACE
             | KW_SECTION
             | KW_END
@@ -115,7 +122,10 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok_in(&[
                 KW_PRIVATE,
                 KW_PROTECTED,
+                KW_PUBLIC,
+                KW_META,
                 KW_NONCOMPUTABLE,
+                KW_NONREC,
                 KW_UNSAFE,
                 KW_PARTIAL,
                 KW_LOCAL,
@@ -247,12 +257,17 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         STRUCT_FIELD,
         group((
             tok(DOC_COMMENT).or_not(),
+            tok_in(&[KW_PRIVATE, KW_PROTECTED, KW_PUBLIC])
+                .repeated()
+                .collect::<Vec<_>>(),
             choice((
                 bracket_binder(g),
                 node(
                     SIMPLE_BINDER,
                     group((
                         tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+                        // A field may take arguments: `G_le_6 (i) : #(G i) ≤ 6`
+                        binders_opt(g),
                         type_spec(g),
                         group((tok(COLON_EQ), term.clone())).or_not(),
                     )),
@@ -336,10 +351,18 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
 
     let module_doc = node(MODULE_DOC, tok(MOD_DOC_COMMENT));
 
+    // `module` marks the file as a module; `public import` and `meta import`
+    // carry the visibility of the import.
+    let module_cmd = node(MODULE_CMD, tok(KW_MODULE));
+
     let import = node(
         IMPORT,
         group((
             tok(KW_PRELUDE).or_not(),
+            // `public meta import X` stacks two modifiers.
+            tok_in(&[KW_PUBLIC, KW_PRIVATE, KW_META])
+                .repeated()
+                .collect::<Vec<_>>(),
             tok(KW_IMPORT),
             tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
         )),
@@ -358,8 +381,35 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // `export Foo (bar baz)`, `include h`, `omit [Inst] h` — core commands that
+    // mathlib uses heavily and that previously reached only the generic
+    // fallback.
+    let export_cmd = node(
+        EXPORT_CMD,
+        group((tok(KW_EXPORT), balanced_run(RAW_TOKENS, never, true))),
+    );
+    let include_cmd = node(
+        INCLUDE_CMD,
+        group((tok(KW_INCLUDE), balanced_run(RAW_TOKENS, never, true))),
+    );
+    let omit_cmd = node(
+        OMIT_CMD,
+        group((tok(KW_OMIT), balanced_run(RAW_TOKENS, never, true))),
+    );
+
     let namespace = node(NAMESPACE, group((tok(KW_NAMESPACE), tok(IDENT))));
-    let section = node(SECTION, group((tok(KW_SECTION), tok(IDENT).or_not())));
+    let section = node(
+        SECTION,
+        group((
+            attr_list.clone().or_not(),
+            // `noncomputable section`, `@[expose] public noncomputable section`
+            tok_in(&[KW_PUBLIC, KW_META, KW_NONCOMPUTABLE, KW_PRIVATE])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(KW_SECTION),
+            tok(IDENT).or_not(),
+        )),
+    );
     let end_cmd = node(END_CMD, group((tok(KW_END), tok(IDENT).or_not())));
 
     let variable_cmd = node(
@@ -367,6 +417,8 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((
             tok_in(&[KW_VARIABLE, KW_VARIABLES]),
             bracket_binder(g).repeated().at_least(1).collect::<Vec<_>>(),
+            // `variable (M) in <command>` scopes the binders to one command.
+            group((tok(KW_IN), cmd.clone())).or_not(),
         )),
     );
 
@@ -500,6 +552,10 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
 
     let simple_commands = choice((
         module_doc,
+        module_cmd,
+        export_cmd,
+        include_cmd,
+        omit_cmd,
         import,
         open_cmd,
         namespace,
@@ -526,7 +582,19 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     ))
     .boxed();
 
+    // A command this parser does not know, such as mathlib's
+    // `assert_not_exists Finset` or `alias foo := bar`. Mirrors the tactic
+    // grammar's fallback: an unfamiliar command should not cascade into the
+    // declarations after it. Requiring a leading identifier keeps it from
+    // claiming the fragments left behind by a failed parse, which begin with
+    // punctuation far more often.
+    let unknown_cmd = node(
+        UNKNOWN_CMD,
+        group((tok(IDENT), balanced_run(RAW_TOKENS, never, true))),
+    );
+
     // Declarations are tried first: they are the only forms that begin with
-    // modifiers, and `@[…]` or `private` must not be mistaken for anything else.
-    choice((declarations, simple_commands, meta_commands)).boxed()
+    // modifiers, and `@[…]` or `private` must not be mistaken for anything
+    // else. The generic fallback is last.
+    choice((declarations, simple_commands, meta_commands, unknown_cmd)).boxed()
 }

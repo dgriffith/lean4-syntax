@@ -229,6 +229,33 @@ pub fn adjacent_tok<'a>(kind: SyntaxKind) -> impl Parser<'a, In<'a>, Frag, Extra
     })
 }
 
+/// A list whose separator is optional, for constructs Lean lets newlines
+/// separate — structure instance fields, most visibly.
+pub fn list_maybe_sep<'a, P>(
+    item: P,
+    sep: SyntaxKind,
+) -> impl Parser<'a, In<'a>, Vec<Frag>, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
+{
+    item.clone()
+        .then(
+            group((tok(sep).or_not(), item))
+                .repeated()
+                .collect::<Vec<(Option<Frag>, Frag)>>(),
+        )
+        .then(tok(sep).or_not())
+        .map(|((first, rest), trailing)| {
+            let mut kids = vec![first];
+            for (s, i) in rest {
+                kids.extend(s);
+                kids.push(i);
+            }
+            kids.extend(trailing);
+            kids
+        })
+}
+
 /// True if this token opens a bracketed group, returning its closer.
 pub fn closer_for(kind: SyntaxKind) -> Option<SyntaxKind> {
     use SyntaxKind::*;

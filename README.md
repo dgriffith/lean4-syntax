@@ -71,7 +71,8 @@ Lean 4's grammar is user-extensible — `notation`, `infixl`, `macro_rules` and
 claim total coverage. This one covers the core language and **records**
 grammar-extending commands without applying them.
 
-Covered: all commands and declaration forms (`def`, `theorem`, `structure`,
+Covered: Lean's module system (`module`, `public import`, `@[expose] public
+section`); all commands and declaration forms (`def`, `theorem`, `structure`,
 `class`, `inductive`, `instance`, `mutual`, …) with modifiers, attributes,
 docstrings, universe binders, `where` clauses and `deriving`; the full term
 grammar with Lean's built-in precedence table; binders in all four
@@ -85,6 +86,7 @@ Deliberately not interpreted:
 | `notation`, `infixl`, `prefix`, `postfix` | recorded as `NOTATION_CMD` / `MIXFIX_CMD`; the new syntax does **not** become available to the term parser |
 | `syntax`, `macro`, `macro_rules`, `elab` | recorded; bodies kept as `RAW_TOKENS` |
 | syntax quotations `` `(…) `` | contents kept as `RAW_TOKENS` |
+| unrecognised commands | `UNKNOWN_CMD` plus a balanced token run, so an unfamiliar command does not cascade into the declarations after it |
 
 ### Tactics
 
@@ -124,9 +126,11 @@ non-empty one is a visible signal of an unmodelled form.
 
 ### Known limitations
 
-- **Precedences are Lean's built-in table.** A file that declares its own
-  operators parses them as application or fails locally; it will not honour the
-  declared precedence.
+- **User notation is the dominant gap.** 78.4% of mathlib files use at least one
+  character the lexer does not know — `‖` (30,830 occurrences), `≫` (27,345),
+  `⟶` (24,803), `⥤`, `∑`, `∫` and a 295-character tail. Precedences are Lean's
+  built-in table, so a file declaring its own operators will not honour the
+  declared precedence either.
 - **Big terms are not bare application arguments.** Lean restricts arguments to
   maximal precedence, and this parser follows it, with a trailing lambda as the
   one exception (`xs.map fun x => x + 1` works). So `f do …` needs
@@ -141,6 +145,42 @@ non-empty one is a visible signal of an unmodelled form.
   would it in Lean.
 - Uncommon brace terms beyond `{x := e}`, `{s with …}`, `{x // p}`, `{x | p}`
   and `{a, b}` are not modeled.
+
+## Validation against mathlib
+
+`examples/corpus_report.rs` parses a directory tree and reports what the parser
+cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
+
+| | |
+|---|---|
+| Round-trip failures | **0** |
+| Panics | **0** |
+| Files parsing with no errors | 9.3% |
+| Files containing a character the lexer cannot classify | **78.4%** |
+
+The first two numbers are the ones that had to be zero: losslessness and
+not-crashing are unconditional promises, and they hold across 102 MB of real
+Lean including every construct mathlib uses.
+
+The last number is the ceiling. Until user notation is handled, no more than
+~21% of mathlib files can parse cleanly regardless of what else improves, so
+that is the gating work rather than any individual missing form. The report
+separates causes from symptoms two ways — ranking only the *first* failure in
+each file, and censusing unclassifiable characters directly — because recovery
+leaves fragments behind and those fragments otherwise dominate the counts.
+
+Running it found gaps that a hand-written corpus never would, most of them core
+language rather than mathlib notation: the module system (in 8,750 of 9,160
+files), `noncomputable section`, `variable (α) in`, `show T by tac`,
+newline-separated structure instance fields, structure fields with binders,
+`#[…]` array literals, the `↑`/`⇑`/`↥` coercion arrows, `include`/`omit`/`export`,
+and `nonrec` — which was being read as a command, detaching it from the
+declaration it modifies. `tests/data/module_system.lean` and
+`tests/corpus_forms.rs` keep all of them fixed.
+
+```
+cargo run --release --example corpus_report -- path/to/mathlib4
+```
 
 ## Usage
 

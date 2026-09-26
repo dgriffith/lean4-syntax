@@ -245,6 +245,17 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // `#[a, b]` — core Lean's array literal.
+    let array_lit = node(
+        ARRAY_LIT,
+        group((
+            tok(HASH),
+            tok(L_BRACKET),
+            comma_terms.clone().or_not(),
+            tok(R_BRACKET),
+        )),
+    );
+
     let list_lit = choice((
         // `[0:10]` and `[0:10:2]` — the ranges `for` loops iterate over.
         node(
@@ -302,21 +313,24 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             group((
                 tok(L_BRACE),
                 node(STRUCT_INST_SRC, group((term.clone(), tok(KW_WITH)))),
-                sep_list(struct_field.clone(), COMMA).or_not(),
+                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[COMMA], false).or_not(),
                 tok(R_BRACE),
             )),
         ),
-        // `{ x := 1, y := 2 }`
+        // `{ x := 1, y := 2 }`, and the same with fields on separate lines,
+        // which Lean accepts without commas.
         node(
             STRUCT_INST,
             group((
                 tok(L_BRACE),
-                sep_list(
+                layout_block(
+                    STRUCT_FIELD_LIST,
                     node(
                         STRUCT_INST_FIELD,
                         group((tok(IDENT), tok(COLON_EQ), term.clone())),
                     ),
-                    COMMA,
+                    &[COMMA],
+                    false,
                 ),
                 tok(R_BRACE),
             )),
@@ -440,12 +454,20 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    let by_term = node(BY_TERM, group((tok(KW_BY), g.tactic_seq.clone())));
+
+    // `show T from e` and `show T by tac` are both proofs of the restatement.
     let show_term = node(
         SHOW_TERM,
         group((
             tok(KW_SHOW),
             term.clone(),
-            group((tok(KW_FROM), term.clone())).or_not(),
+            choice((
+                group((tok(KW_FROM), term.clone()))
+                    .map(|(kw, t)| Frag::Node(DECL_BODY, vec![kw, t])),
+                by_term.clone(),
+            ))
+            .or_not(),
         )),
     );
 
@@ -455,7 +477,12 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(KW_SUFFICES),
             let_lhs.clone().or_not(),
             type_spec(g).or_not(),
-            group((tok(KW_FROM), term.clone())).or_not(),
+            choice((
+                group((tok(KW_FROM), term.clone()))
+                    .map(|(kw, t)| Frag::Node(DECL_BODY, vec![kw, t])),
+                by_term.clone(),
+            ))
+            .or_not(),
         )),
     );
 
@@ -509,7 +536,6 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
     ));
 
-    let by_term = node(BY_TERM, group((tok(KW_BY), g.tactic_seq.clone())));
     let do_term = node(DO_TERM, group((tok(KW_DO), g.do_seq.clone())));
 
     // `calc a = b := pf` followed by `_ = c := pf` steps.
@@ -566,6 +592,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         quoted,
         paren,
         anon_ctor,
+        array_lit,
         list_lit,
         brace,
         anon_have,
@@ -683,6 +710,8 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let prefixes = vec![
         prefix(40, tok_in(&[NOT]), mk_prefix),
         prefix(75, tok_in(&[MINUS, BANG]), mk_prefix),
+        // `↑x`, `⇑f`, `↥S` bind tighter than any operator.
+        prefix(1000, tok_in(&[UP_ARROW, COE_FUN, COE_SORT]), mk_prefix),
         // `← e` inside `do`; harmless elsewhere.
         prefix(1, tok_in(&[LEFT_ARROW, LEFT_ARROW_ASCII]), mk_prefix),
     ];

@@ -108,8 +108,16 @@ kinds! {
     keywords {
         // Commands and declaration heads.
         KW_IMPORT = "import",
+        // Lean's module system: `module`, `public import X`, `public section`,
+        // `meta import X`. Present in 95% of current mathlib files.
+        KW_MODULE = "module",
+        KW_PUBLIC = "public",
+        KW_META = "meta",
         KW_PRELUDE = "prelude",
         KW_OPEN = "open",
+        KW_EXPORT = "export",
+        KW_INCLUDE = "include",
+        KW_OMIT = "omit",
         KW_NAMESPACE = "namespace",
         KW_SECTION = "section",
         KW_END = "end",
@@ -153,6 +161,7 @@ kinds! {
         KW_PARTIAL = "partial",
         KW_UNSAFE = "unsafe",
         KW_NONCOMPUTABLE = "noncomputable",
+        KW_NONREC = "nonrec",
         KW_LOCAL = "local",
         KW_SCOPED = "scoped",
         // Terms.
@@ -243,6 +252,10 @@ kinds! {
         LEFT_ARROW_ASCII = "<-",
         LEFT_ARROW = "\u{2190}",  // ←
         MAPSTO = "\u{21a6}",      // ↦
+        // Core Lean's coercion arrows, all prefix at maximal precedence.
+        UP_ARROW = "\u{2191}",    // ↑
+        COE_FUN = "\u{21d1}",     // ⇑
+        COE_SORT = "\u{21a5}",    // ↥
         FAT_ARROW = "=>",
         IFF_ASCII = "<->",
         IFF = "\u{2194}",         // ↔
@@ -316,8 +329,12 @@ kinds! {
         SOURCE_FILE,
         // Commands.
         MODULE_DOC,
+        MODULE_CMD,
         IMPORT,
         OPEN_CMD,
+        EXPORT_CMD,
+        INCLUDE_CMD,
+        OMIT_CMD,
         OPEN_HIDING,
         OPEN_RENAMING,
         OPEN_ONLY,
@@ -415,6 +432,7 @@ kinds! {
         STRUCT_INST_SRC,
         STRUCT_INST_FIELD,
         LIST_LIT,
+        ARRAY_LIT,
         SET_LIT,
         RANGE_LIT,
         UNIV_ARGS,
