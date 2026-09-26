@@ -525,8 +525,9 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     .boxed();
 
     let base = choice((
-        // `· tac` / `• tac` — focus on the first goal.
-        node(TACTIC_FOCUS, group((tok_in(&[CDOT, BULLET]), seq.clone()))),
+        // `· tac` — focus on the first goal. Lean uses `·` for this; `•` is
+        // scalar multiplication, so it must not be treated as a focus dot.
+        node(TACTIC_FOCUS, group((tok(CDOT), seq.clone()))),
         // `(tac; tac)` — an explicit block.
         node(
             TACTIC_SEQ_BRACKETED,

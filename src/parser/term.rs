@@ -49,6 +49,19 @@ fn mk_postfix<'a>(lhs: Frag, op: Frag, _: &mut MapExtra<'a, '_, In<'a>, Extra<'a
     Frag::Node(POSTFIX_TERM, vec![lhs, op])
 }
 
+/// An infix operator that may carry a bracketed parameter.
+///
+/// mathlib's bundled-morphism arrows are written this way — `M →ₗ[R] N`,
+/// `M ⊗[R] N` — so the operator token is followed by `[…]` before its right
+/// operand. Taking `kinds` by `&'static [_]` keeps every call the same type, so
+/// the entries can share one table.
+fn param_op<'a>(
+    kinds: &'static [SyntaxKind],
+    params: BoxedP<'a, Frag>,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + use<'a> {
+    node(OPERATOR, group((tok_in(kinds), params.or_not())))
+}
+
 /// `: T`
 pub fn type_spec<'a>(
     g: &Grammar<'a>,
@@ -186,10 +199,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((tok(QUESTION), tok_in(&[IDENT, UNDERSCORE]))),
     );
     let sorry = node(SORRY_TERM, tok(KW_SORRY));
-    let cdot = node(CDOT_TERM, tok_in(&[CDOT, BULLET]));
+    // Only `·` is the placeholder dot. `•` is scalar multiplication, and is an
+    // infix operator rather than an atom.
+    let cdot = node(CDOT_TERM, tok(CDOT));
     // `.mk`, `.none` — constructor names resolved from the expected type.
     let dot_ident = node(DOT_IDENT, group((tok(DOT), ident())));
-    let at_term = node(AT_TERM, group((tok(AT), tok_in(&[IDENT, UNDERSCORE]))));
 
     // `Type`, `Type u`, `Type*`, `Sort 0`, `Prop`.
     let sort = node(
@@ -206,6 +220,18 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
 
     let paren = choice((
         node(PAREN_TERM, group((tok(L_PAREN), tok(R_PAREN)))),
+        // `f (p := e)` passes an argument by name. Distinguishable from an
+        // ascription because `:=` and `:` are different tokens.
+        node(
+            NAMED_ARG,
+            group((
+                tok(L_PAREN),
+                tok(IDENT),
+                tok(COLON_EQ),
+                term.clone(),
+                tok(R_PAREN),
+            )),
+        ),
         node(
             TYPE_ASCRIPTION,
             group((
@@ -235,6 +261,75 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             group((tok(L_PAREN), term.clone(), tok(R_PAREN))),
         ),
     ));
+
+    // A notation character with no specific rule: usable as an atom, so `∞`,
+    // `⊤`, `𝟙 X` and the rest of the 292-character tail parse without being
+    // enumerated one by one.
+    // Curated constants, usable wherever a term is — including as an
+    // application argument.
+    let constant_term = node(
+        SYMBOL_TERM,
+        tok_in(&[TOP, BOT, EMPTY_SET, INFINITY, ONE_MORPH, ZERO_MORPH]),
+    );
+
+    // A notation character with no rule of its own. Deliberately *not* an
+    // argument atom: application is greedy and runs before the operator table,
+    // so putting this in the argument set would make `a ⊸ b` parse as
+    // `APP(a, ⊸, b)` and the operator would never get a chance. It stays a
+    // leading atom, so `𝟙 X` and a bare `∞` still work.
+    let symbol_term = node(SYMBOL_TERM, tok(SYMBOL));
+
+    // `$x` and `$(e)` splice a term into a quotation or a `congr(…)` macro.
+    let antiquotation = node(
+        ANTIQUOTATION,
+        group((
+            tok(DOLLAR),
+            choice((
+                tok_in(&[IDENT, UNDERSCORE]),
+                node(
+                    PAREN_TERM,
+                    group((tok(L_PAREN), term.clone(), tok(R_PAREN))),
+                ),
+            )),
+        )),
+    );
+
+    // Curated delimiter pairs. These cannot go through the generic fallback:
+    // `‖` is the same character at both ends, so it has to be a rule.
+    let notation_bracket = choice((
+        node(
+            NOTATION_BRACKET,
+            group((tok(NORM_BAR), term.clone(), tok(NORM_BAR))),
+        ),
+        node(
+            NOTATION_BRACKET,
+            group((tok(L_FLOOR), term.clone(), tok(R_FLOOR))),
+        ),
+        node(
+            NOTATION_BRACKET,
+            group((tok(L_CEIL), term.clone(), tok(R_CEIL))),
+        ),
+        node(
+            NOTATION_BRACKET,
+            group((
+                tok(L_LIE),
+                sep_list(term.clone(), COMMA).or_not(),
+                tok(R_LIE),
+            )),
+        ),
+        node(
+            NOTATION_BRACKET,
+            group((
+                tok(L_ANGLE_INNER),
+                sep_list(term.clone(), COMMA).or_not(),
+                tok(R_ANGLE_INNER),
+            )),
+        ),
+    ));
+
+    // `#s` — cardinality. Ordered after `array_lit` in the atom list so that
+    // `#[1, 2]` stays an array literal rather than `#` applied to a list.
+    let card_term = node(PREFIX_TERM, group((tok(HASH), term.clone())));
 
     let anon_ctor = node(
         ANON_CTOR,
@@ -373,10 +468,20 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
     ));
 
+    // `@f`, and also `@fun (a : T) => e`, which makes a lambda's implicit
+    // arguments explicit.
+    let at_term = node(
+        AT_TERM,
+        group((
+            tok(AT),
+            choice((tok_in(&[IDENT, UNDERSCORE]), fun_term.clone())),
+        )),
+    );
+
     // `∃ x > 0, p x` — the relation is sugar for a conjunction.
     let binder_pred = group((
         tok_in(&[
-            LT, GT, LE, GE, LE_ASCII, GE_ASCII, NE, MEM, NOT_MEM, SUBSET_EQ, EQ,
+            LT, GT, LE, GE, LE_ASCII, GE_ASCII, NE, MEM, NOT_MEM, SUBSET_EQ, EQ, KW_IN,
         ]),
         term.clone(),
     ));
@@ -384,7 +489,28 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let quantifier = node(
         QUANTIFIER,
         group((
-            tok_in(&[FORALL, KW_FORALL_KW, EXISTS, KW_EXISTS_KW, SIGMA, PI]),
+            // Big operators bind variables exactly as the quantifiers do:
+            // `∑ i ∈ s, f i` has the shape of `∀ i ∈ s, p i`.
+            tok_in(&[
+                FORALL,
+                KW_FORALL_KW,
+                EXISTS,
+                KW_EXISTS_KW,
+                SIGMA,
+                PI,
+                BIG_SUM,
+                BIG_PROD,
+                BIG_UNION,
+                BIG_INTER,
+                BIG_SUP,
+                BIG_INF,
+                BIG_OPLUS,
+                BIG_OTIMES,
+                INTEGRAL,
+                // A decorated big operator — `∫ˢ`, `∑'` — lexes as a generic
+                // symbol, and still binds variables.
+                SYMBOL,
+            ]),
             binders(g),
             type_spec(g).or_not(),
             binder_pred.or_not(),
@@ -591,24 +717,28 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         sorry,
         quoted,
         paren,
+        notation_bracket,
         anon_ctor,
         array_lit,
+        card_term,
         list_lit,
         brace,
         anon_have,
         at_term,
+        antiquotation,
         synthetic_hole,
         dot_ident,
         cdot,
         hole,
         reference,
+        constant_term,
     ))
     .boxed();
 
     // `dep_arrow` must precede `paren` so `(x : α) → β` is read as a dependent
     // arrow rather than an ascription followed by a stray arrow. It is a head
     // position only: in `f (x : α) → β` the parenthesised part is an argument.
-    let atom_head = choice((big, dep_arrow, small.clone())).boxed();
+    let atom_head = choice((big, dep_arrow, small.clone(), symbol_term)).boxed();
 
     // ---- Trailers ----------------------------------------------------------
 
@@ -697,6 +827,16 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
         infix(right(75), tok_in(&[CARET]), mk_infix),
         infix(right(90), tok_in(&[COMPOSE]), mk_infix),
+        // Curated from the mathlib census, with Lean's own precedences.
+        infix(right(80), tok_in(&[GG, GGG]), mk_infix),
+        // `f  s` is Set.image, infixl:80 in mathlib.
+        infix(left(80), tok_in(&[IMAGE]), mk_infix),
+        infix(right(73), tok_in(&[BULLET]), mk_infix),
+        infix(right(26), tok_in(&[FUNCTOR_ARROW]), mk_infix),
+        infix(right(10), tok_in(&[LONG_ARROW]), mk_infix),
+        infix(left(50), tok_in(&[CONGR_MOD, TILDE]), mk_infix),
+        infix(left(35), tok_in(&[QUOTIENT]), mk_infix),
+        infix(left(60), tok_in(&[DOT_DOT]), mk_infix),
         infix(right(100), tok_in(&[MAP]), mk_infix),
         // `f <| x` and `x |> f` are the low-precedence application pipes.
         infix(right(2), tok_in(&[PIPE_LEFT, DOLLAR]), mk_infix),
@@ -716,9 +856,47 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         prefix(1, tok_in(&[LEFT_ARROW, LEFT_ARROW_ASCII]), mk_prefix),
     ];
 
-    let postfixes = vec![postfix(1000, tok_in(&[INV]), mk_postfix)];
+    // Modifier runs are postfix at maximal precedence: `sᶜ`, `Xᵒᵖ`, `‖x‖₊`.
+    let postfixes = vec![postfix(1000, tok_in(&[INV, MODIFIER]), mk_postfix)];
 
-    app.pratt((infixes, arrows, prefixes, postfixes)).boxed()
+    // Operators that may carry a bracketed parameter. `⊗` gets Lean's
+    // precedence; `SYMBOL` — every notation character without a rule of its
+    // own — gets an *assumed* one, which is why the operator keeps the `SYMBOL`
+    // token kind: a consumer can tell a known precedence from a guessed one.
+    let bracket_params = node(
+        ARG_LIST,
+        group((
+            tok(L_BRACKET),
+            sep_list(term.clone(), COMMA).or_not(),
+            tok(R_BRACKET),
+        )),
+    )
+    .boxed();
+    // A generic symbol written flush against its operand is postfix notation:
+    // `Kᗮ` is an orthogonal complement, `A†` an adjoint. Adjacency is what
+    // separates these from infix use, since Lean style puts spaces around
+    // binary operators and none before a postfix modifier. Tried before the
+    // generic infix entry below.
+    let adjacent_postfix = vec![postfix(1000, adjacent_tok(SYMBOL), mk_postfix)];
+
+    let parameterized = vec![
+        infix(
+            left(70),
+            param_op(&[OTIMES], bracket_params.clone()),
+            mk_infix,
+        ),
+        infix(left(65), param_op(&[SYMBOL], bracket_params), mk_infix),
+    ];
+
+    app.pratt((
+        infixes,
+        arrows,
+        prefixes,
+        postfixes,
+        adjacent_postfix,
+        parameterized,
+    ))
+    .boxed()
 }
 
 /// A `do` block's statement sequence.

@@ -455,6 +455,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             ),
             tok(R_BRACKET),
             tok(IDENT).repeated().collect::<Vec<_>>(),
+            group((tok(KW_IN), cmd.clone())).or_not(),
         )),
     );
 
@@ -590,7 +591,13 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // punctuation far more often.
     let unknown_cmd = node(
         UNKNOWN_CMD,
-        group((tok(IDENT), balanced_run(RAW_TOKENS, never, true))),
+        group((
+            tok_in(&[KW_LOCAL, KW_SCOPED])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(IDENT),
+            balanced_run(RAW_TOKENS, never, true),
+        )),
     );
 
     // Declarations are tried first: they are the only forms that begin with

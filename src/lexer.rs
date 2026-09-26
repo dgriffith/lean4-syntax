@@ -79,6 +79,37 @@ fn is_letter_like(c: char) -> bool {
         || (0x3040..=0x30ff).contains(&v) // Hiragana / Katakana
 }
 
+/// Superscript and subscript modifier characters.
+///
+/// Lean notation uses these only as postfix — `sᶜ` for complement, `Xᵒᵖ` for
+/// the opposite category, `‖x‖₊` for a non-negative norm — and they also modify
+/// an operator they follow, which is why `→` and `→ₗ` are different arrows.
+fn is_modifier(c: char) -> bool {
+    let v = c as u32;
+    matches!(v, 0xb2 | 0xb3 | 0xb9)
+        || (0x2b0..=0x2ff).contains(&v)   // spacing modifier letters
+        || (0x1d2c..=0x1d6a).contains(&v) // phonetic extensions (ᵒ ᵐ ᵖ)
+        || (0x1d9b..=0x1dbf).contains(&v) // phonetic extensions supplement (ᶜ ᶠ)
+        || (0x2070..=0x209c).contains(&v) // superscripts and subscripts
+}
+
+/// Could this character be part of notation?
+///
+/// Any non-ASCII character can be, and the rule has to be this permissive
+/// because Lean's token table admits arbitrary strings: a library may declare
+/// notation from any block it likes, and mathlib does. It uses `⁅x, y⁆` from
+/// General Punctuation for Lie brackets and `Kᗮ` from *Canadian Syllabics* for
+/// orthogonal complements. Enumerating Unicode's mathematical blocks was tried
+/// first and left a tail of 94 characters that no principled block list would
+/// have caught.
+///
+/// So the lexer cannot know that a character is *not* notation, and does not
+/// guess. `LEX_ERROR` is left for what is genuinely malformed: control
+/// characters, and unterminated literals.
+fn is_notation_char(c: char) -> bool {
+    !c.is_ascii() && !c.is_whitespace() && !c.is_control()
+}
+
 /// Subscript letters and digits, which Lean allows inside identifiers.
 fn is_subscript(c: char) -> bool {
     let v = c as u32;
@@ -99,6 +130,13 @@ fn is_id_rest(c: char) -> bool {
         || is_subscript(c)
         || matches!(c, '_' | '\'' | '!' | '?' | '\u{271d}')
 }
+
+/// Suffixes that decorate a one-character type name into notation of its own:
+/// `ℕ+` is `PNat`, `ℝ≥0` is `NNReal`, `ℝ≥0∞` is `ENNReal`. Longest first.
+///
+/// Applied only after a single non-ASCII letter, which is what keeps a
+/// sloppily-spaced `a+ b` from lexing as the identifier `a+`.
+const TYPE_SUFFIXES: &[&str] = &["\u{2265}0\u{221e}", "\u{2265}0", "+"];
 
 /// The tokenizer state.
 struct Lexer<'a> {
@@ -201,6 +239,11 @@ impl<'a> Lexer<'a> {
             return self.ident_or_keyword(start, line, col);
         } else if c == '`' {
             self.backtick()
+        } else if self.starts_with("''") {
+            // `f '' s` is `Set.image`, not two empty character literals.
+            self.bump();
+            self.bump();
+            SyntaxKind::IMAGE
         } else if c == '\'' {
             self.char_literal()
         } else {
@@ -374,6 +417,18 @@ impl<'a> Lexer<'a> {
     fn ident_or_keyword(&mut self, start: usize, line: u32, col: u32) {
         self.bump_while(is_id_rest);
         self.continue_dotted_ident();
+        // `ℕ+` and friends are single tokens in Lean's token table.
+        let so_far = &self.src[start..self.pos];
+        if so_far.chars().count() == 1 && !so_far.is_ascii() {
+            for suffix in TYPE_SUFFIXES {
+                if self.starts_with(suffix) {
+                    for _ in 0..suffix.chars().count() {
+                        self.bump();
+                    }
+                    break;
+                }
+            }
+        }
         let text = &self.src[start..self.pos];
         // Only an undotted, unescaped word can be a reserved word.
         let kind = keyword_kind(text).unwrap_or(SyntaxKind::IDENT);
@@ -458,15 +513,42 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Longest-match punctuation, or a one-character error token.
+    /// Longest-match punctuation, then the generic notation fallbacks, then a
+    /// one-character error token.
     fn symbol(&mut self) -> SyntaxKind {
         for (text, kind) in SORTED_SYMBOLS.iter() {
             if self.starts_with(text) {
                 for _ in 0..text.chars().count() {
                     self.bump();
                 }
+                // A suffix makes a different operator: `→ₗ[R]` is the
+                // linear-map arrow, `→+` the additive-monoid hom, `⁻¹'` the
+                // preimage. Restricted to non-ASCII base symbols so that `a +`
+                // and `x *` are unaffected.
+                let decorated = !kind.is_delimiter()
+                    && !text.is_ascii()
+                    && self
+                        .peek()
+                        .is_some_and(|c| is_modifier(c) || matches!(c, '+' | '*' | '\''));
+                if decorated {
+                    self.bump_while(|c| is_modifier(c) || matches!(c, '+' | '*' | '\''));
+                    return SyntaxKind::SYMBOL;
+                }
                 return *kind;
             }
+        }
+
+        let c = self.peek().expect("caller checked for input");
+        if is_modifier(c) {
+            // A modifier run that begins a token is postfix notation applied to
+            // whatever preceded it.
+            self.bump_while(is_modifier);
+            return SyntaxKind::MODIFIER;
+        }
+        if is_notation_char(c) {
+            self.bump();
+            self.bump_while(is_modifier);
+            return SyntaxKind::SYMBOL;
         }
         self.bump();
         SyntaxKind::LEX_ERROR
@@ -563,6 +645,69 @@ mod tests {
         assert_eq!(dump("`Nat.zero"), "NAME_LIT(`Nat.zero)");
         assert_eq!(dump("``foo"), "NAME_LIT(``foo)");
         assert_eq!(dump("`(x)"), "BACKTICK(`) L_PAREN(() IDENT(x) R_PAREN())");
+    }
+
+    #[test]
+    fn unknown_notation_lexes_as_a_symbol_rather_than_an_error() {
+        // mathlib uses 292 characters this parser has no specific rule for.
+        // They must reach the parser as notation, not as lexer errors.
+        assert_eq!(dump("⊸"), "SYMBOL(⊸)");
+        assert_eq!(dump("⨯"), "SYMBOL(⨯)");
+        // mathlib reaches well outside Unicode's mathematical blocks: `⁅⁆` are
+        // General Punctuation and `ᗮ` is Canadian Syllabics.
+        assert_eq!(dump("ᗮ"), "SYMBOL(ᗮ)");
+        // Since any character may be declared as notation, the lexer does not
+        // guess that one is not. LEX_ERROR is for the genuinely malformed.
+        assert_eq!(dump("\u{1f600}"), "SYMBOL(😀)");
+        assert_eq!(dump("\u{0}"), "LEX_ERROR(\0)");
+    }
+
+    #[test]
+    fn modifiers_attach_to_the_operator_they_follow() {
+        // `→` and `→ₗ` are different arrows, so the modifier joins the token.
+        assert_eq!(dump("→ₗ"), "SYMBOL(→ₗ)");
+        assert_eq!(dump("→"), "ARROW(→)");
+        // A modifier run that starts a token is postfix notation.
+        assert_eq!(dump("ᶜ"), "MODIFIER(ᶜ)");
+        assert_eq!(dump("ᵒᵖ"), "MODIFIER(ᵒᵖ)");
+        assert_eq!(dump("sᶜ"), "IDENT(s) MODIFIER(ᶜ)");
+        // Subscripts still belong to an identifier that precedes them.
+        assert_eq!(dump("x₀"), "IDENT(x₀)");
+        // `⁻¹` keeps its own kind, being a known symbol.
+        assert_eq!(dump("⁻¹"), "INV(⁻¹)");
+    }
+
+    #[test]
+    fn decorated_operators_are_single_tokens() {
+        // Lean's bundled-morphism arrows are tokens in their own right.
+        assert_eq!(dump("→+"), "SYMBOL(→+)");
+        assert_eq!(dump("→+*"), "SYMBOL(→+*)");
+        assert_eq!(dump("≃ₗ"), "SYMBOL(≃ₗ)");
+        assert_eq!(dump("⁻¹'"), "SYMBOL(⁻¹')");
+        // `''` is `Set.image`, not two character literals.
+        assert_eq!(
+            dump("f '' s"),
+            "IDENT(f) WHITESPACE( ) IMAGE('') WHITESPACE( ) IDENT(s)"
+        );
+        // ASCII operators are left alone, so ordinary arithmetic is unaffected.
+        assert_eq!(dump("a+b"), "IDENT(a) PLUS(+) IDENT(b)");
+        assert_eq!(dump("a+ b"), "IDENT(a) PLUS(+) WHITESPACE( ) IDENT(b)");
+    }
+
+    #[test]
+    fn decorated_type_names_are_single_tokens() {
+        assert_eq!(dump("ℕ+"), "IDENT(ℕ+)");
+        assert_eq!(dump("ℝ≥0"), "IDENT(ℝ≥0)");
+        assert_eq!(dump("ℝ≥0∞"), "IDENT(ℝ≥0∞)");
+        // Only a single non-ASCII letter takes a suffix.
+        assert_eq!(dump("Nat+"), "IDENT(Nat) PLUS(+)");
+    }
+
+    #[test]
+    fn curated_notation_keeps_specific_kinds() {
+        assert_eq!(dump("‖"), "NORM_BAR(‖)");
+        assert_eq!(dump("≫"), "GG(≫)");
+        assert_eq!(dump("∑"), "BIG_SUM(∑)");
     }
 
     #[test]

@@ -86,6 +86,7 @@ Deliberately not interpreted:
 | `notation`, `infixl`, `prefix`, `postfix` | recorded as `NOTATION_CMD` / `MIXFIX_CMD`; the new syntax does **not** become available to the term parser |
 | `syntax`, `macro`, `macro_rules`, `elab` | recorded; bodies kept as `RAW_TOKENS` |
 | syntax quotations `` `(…) `` | contents kept as `RAW_TOKENS` |
+| unrecognised notation | parses at an *assumed* precedence, flagged in the tree — see Notation |
 | unrecognised commands | `UNKNOWN_CMD` plus a balanced token run, so an unfamiliar command does not cascade into the declarations after it |
 
 ### Tactics
@@ -124,13 +125,39 @@ non-empty one is a visible signal of an unmodelled form.
 (`RCASES_PAT`, `RCASES_TUPLE`, `RCASES_ALT`), covering tuples, alternations,
 `-` to clear a hypothesis and `@` to expose implicit arguments.
 
+### Notation
+
+Lean's grammar is user-extensible, and mathlib exercises that hard: 292 distinct
+characters appear in it that no fixed table would anticipate — including `⁅x, y⁆`
+from General Punctuation and `Kᗮ` from *Canadian Syllabics*. So notation is
+handled in two layers.
+
+**A curated table** for the head of the distribution, with Lean's own
+precedences: `‖x‖`, `⌊x⌋`, `⌈x⌉`, `⟪x, y⟫`, `⁅x, y⁆` as delimiter pairs; `≫`,
+`⟶`, `⥤`, `•`, `''`, `≡`, `⧸`, `⊗` as operators; `∑`, `∏`, `⋃`, `⨆`, `∫` as
+*binders*, since they bind a variable like a quantifier rather than combining two
+terms; and `⊤`, `⊥`, `∅`, `∞`, `𝟙` as constants.
+
+**A generic fallback** for everything else. Any non-ASCII character reaches the
+parser as a `SYMBOL` token — the lexer cannot know a character is *not* notation,
+because Lean's token table admits arbitrary strings — and a `SYMBOL` works as an
+atom, as an infix operator, or, when written flush against its operand, as a
+postfix one. Operators may carry a bracketed parameter, so mathlib's bundled
+arrows (`M →ₗ[R] N`, `M ⊗[R] N`) parse without being enumerated.
+
+The catch is precedence: a curated operator has Lean's, a generic one has a
+guess. **The tree says which.** A generic operator keeps the `SYMBOL` token kind
+inside its `OPERATOR` node, so anything reasoning about associativity can tell a
+known precedence from an assumed one, rather than silently trusting a guess.
+
 ### Known limitations
 
-- **User notation is the dominant gap.** 78.4% of mathlib files use at least one
-  character the lexer does not know — `‖` (30,830 occurrences), `≫` (27,345),
-  `⟶` (24,803), `⥤`, `∑`, `∫` and a 295-character tail. Precedences are Lean's
-  built-in table, so a file declaring its own operators will not honour the
-  declared precedence either.
+- **Precedence is assumed for uncurated operators.** A file's own `notation` and
+  `infixl` declarations are recorded but not applied, so an operator outside the
+  curated table parses at a default precedence rather than its declared one.
+  This is visible in the tree (see Notation) rather than silent.
+- **`|x|` is not supported.** Absolute value would collide with `|` as used by
+  match alternatives and `rcases` patterns.
 - **Big terms are not bare application arguments.** Lean restricts arguments to
   maximal precedence, and this parser follows it, with a trailing lambda as the
   one exception (`xs.map fun x => x + 1` works). So `f do …` needs
@@ -155,28 +182,33 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 9.3% |
-| Files containing a character the lexer cannot classify | **78.4%** |
+| Files parsing with no errors | 30.8% |
+| Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The last number is the ceiling. Until user notation is handled, no more than
-~21% of mathlib files can parse cleanly regardless of what else improves, so
-that is the gating work rather than any individual missing form. The report
-separates causes from symptoms two ways — ranking only the *first* failure in
-each file, and censusing unclassifiable characters directly — because recovery
-leaves fragments behind and those fragments otherwise dominate the counts.
+The clean rate has moved 0.5% → 9.3% → 30.8% as the gaps below were closed.
+Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
+that rate, are now down to 0.5%.
+
+Finding the gaps needed the report to separate causes from symptoms, which it
+does three ways: it ranks by the position the parser *failed* at rather than
+where recovery resumed, takes only the first failure per file, and censuses
+unclassifiable characters directly. Without that, the ranking is dominated by
+fragments — the top entry was an innocent `(` continuing a declaration whose
+head had already failed.
 
 Running it found gaps that a hand-written corpus never would, most of them core
 language rather than mathlib notation: the module system (in 8,750 of 9,160
 files), `noncomputable section`, `variable (α) in`, `show T by tac`,
 newline-separated structure instance fields, structure fields with binders,
 `#[…]` array literals, the `↑`/`⇑`/`↥` coercion arrows, `include`/`omit`/`export`,
-and `nonrec` — which was being read as a command, detaching it from the
-declaration it modifies. `tests/data/module_system.lean` and
-`tests/corpus_forms.rs` keep all of them fixed.
+`nonrec` — which was being read as a command, detaching it from the declaration
+it modifies — named arguments `f (p := e)`, `$x` antiquotations, and `ℕ+` and
+`→+`, which are single tokens in Lean rather than an identifier or arrow plus
+`+`. The corpus files and `tests/corpus_forms.rs` keep all of them fixed.
 
 ```
 cargo run --release --example corpus_report -- path/to/mathlib4

@@ -577,6 +577,39 @@ ast_node!(
     RANGE_LIT
 );
 ast_node!(
+    /// `#[1, 2, 3]`
+    ArrayLit,
+    ARRAY_LIT
+);
+ast_node!(
+    /// A notation character with no rule of its own, used as a term: `⊤`, `∞`.
+    SymbolTerm,
+    SYMBOL_TERM
+);
+ast_node!(
+    /// A curated delimiter pair: `‖x‖`, `⌊x⌋`, `⟪x, y⟫`, `⁅x, y⁆`.
+    NotationBracket,
+    NOTATION_BRACKET
+);
+ast_node!(
+    /// `f (p := e)` — an argument passed by name.
+    NamedArg,
+    NAMED_ARG
+);
+ast_node!(
+    /// `$x` — a term spliced into a quotation or macro.
+    Antiquotation,
+    ANTIQUOTATION
+);
+ast_node!(
+    /// An infix operator, possibly with a bracketed parameter as in `→ₗ[R]`.
+    ///
+    /// A `SYMBOL` token here means the precedence was *assumed* rather than
+    /// taken from Lean, which matters to anything reasoning about associativity.
+    Operator,
+    OPERATOR
+);
+ast_node!(
     /// `{ x : T // p x }`
     Subtype,
     SUBTYPE
@@ -889,6 +922,11 @@ ast_enum!(
         List(ListLit),
         Set(SetLit),
         Range(RangeLit),
+        Array(ArrayLit),
+        Symbol(SymbolTerm),
+        NotationBracket(NotationBracket),
+        NamedArg(NamedArg),
+        Antiquotation(Antiquotation),
         Subtype(Subtype),
         SetOf(SetOf),
         Proj(Proj),

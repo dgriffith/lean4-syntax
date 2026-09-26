@@ -17,6 +17,12 @@
 //! cascade, not a command mathlib actually defines. Names like `alias`,
 //! `run_cmd` and `termination_by` are the real entries.
 //!
+//! The primary ranking uses the position the parser actually *failed* at, taken
+//! from the reported errors, not the start of the `ERROR` node. Those differ:
+//! recovery resumes at the next top-level token, so an `ERROR` node begins after
+//! the mistake and its first token is usually an innocent `(` continuing a
+//! declaration. Ranking by failure position names the construct instead.
+//!
 //! Two further breakdowns separate causes from symptoms. Recovery resumes at
 //! the next top-level token, so one unsupported construct leaves a trail of
 //! fragments behind it; ranking only the *first* failure in each file
@@ -52,6 +58,9 @@ enum Outcome {
         unknown_commands: Vec<String>,
         /// Text of every token the lexer could not classify.
         unknown_chars: Vec<String>,
+        /// Where the parser actually failed, as opposed to where recovery
+        /// resumed.
+        failures: Vec<(Signature, usize, String)>,
     },
 }
 
@@ -122,8 +131,8 @@ fn main() {
     let mut unknown_cmds: BTreeMap<String, usize> = BTreeMap::new();
     let mut unknown_chars: BTreeMap<String, usize> = BTreeMap::new();
     let mut files_with_unknown_chars = 0usize;
-    let mut first_errors: BTreeMap<Signature, usize> = BTreeMap::new();
-    let mut first_examples: BTreeMap<Signature, Example> = BTreeMap::new();
+    let mut failures: BTreeMap<Signature, usize> = BTreeMap::new();
+    let mut failure_examples: BTreeMap<Signature, Example> = BTreeMap::new();
 
     let start = Instant::now();
     for path in &files {
@@ -139,6 +148,7 @@ fn main() {
                 errors,
                 unknown_commands,
                 unknown_chars: chars,
+                failures: file_failures,
             } => {
                 for name in unknown_commands {
                     *unknown_cmds.entry(name).or_default() += 1;
@@ -156,17 +166,16 @@ fn main() {
                 with_errors += 1;
                 per_file.push((errors.len(), path.clone()));
                 let lines = LineIndex::new(&src);
-                // The first failure in a file is the likely cause; the rest are
-                // usually fragments left by recovery.
-                if let Some((sig, offset, snippet)) = errors.first() {
-                    *first_errors.entry(sig.clone()).or_default() += 1;
-                    first_examples
-                        .entry(sig.clone())
-                        .or_insert_with(|| Example {
-                            file: path.clone(),
-                            line: lines.line_of(*offset),
-                            snippet: snippet.clone(),
-                        });
+                // Only the first failure in a file, since later ones are
+                // usually reported from inside a region recovery already gave
+                // up on and would swamp the ranking.
+                for (sig, offset, snippet) in file_failures.into_iter().take(1) {
+                    *failures.entry(sig.clone()).or_default() += 1;
+                    failure_examples.entry(sig).or_insert_with(|| Example {
+                        file: path.clone(),
+                        line: lines.line_of(offset),
+                        snippet,
+                    });
                 }
                 for (sig, offset, snippet) in errors {
                     *counts.entry(sig.clone()).or_default() += 1;
@@ -234,12 +243,12 @@ fn main() {
         println!();
     }
 
-    let mut ranked_first: Vec<_> = first_errors.iter().collect();
-    ranked_first.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    println!("first failure per file, which approximates root cause:");
-    for (sig, n) in ranked_first.iter().take(top) {
+    let mut ranked_failures: Vec<_> = failures.iter().collect();
+    ranked_failures.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    println!("where the parser actually failed, which names the construct:");
+    for (sig, n) in ranked_failures.iter().take(top) {
         println!("\n  {n:>6}  {sig}");
-        if let Some(ex) = first_examples.get(*sig) {
+        if let Some(ex) = failure_examples.get(*sig) {
             println!("          {}:{}", ex.file.display(), ex.line);
             println!("          {}", ex.snippet);
         }
@@ -314,15 +323,30 @@ fn examine(src: &str) -> Outcome {
                 (signature(&n), offset, snippet(&n))
             })
             .collect();
-        (lossless, errors, unknown_commands, unknown_chars)
+        // Where the parser stopped, which is what names the construct.
+        let root = parse.syntax();
+        let failures: Vec<(Signature, usize, String)> = parse
+            .errors()
+            .iter()
+            .map(|e| {
+                let offset = u32::from(e.range.start()) as usize;
+                (
+                    failure_signature(&root, e.range.start()),
+                    offset,
+                    line_at(src, offset),
+                )
+            })
+            .collect();
+        (lossless, errors, unknown_commands, unknown_chars, failures)
     }));
     match result {
         Err(_) => Outcome::Panicked,
         Ok((false, ..)) => Outcome::NotLossless,
-        Ok((true, errors, unknown_commands, unknown_chars)) => Outcome::Parsed {
+        Ok((true, errors, unknown_commands, unknown_chars, failures)) => Outcome::Parsed {
             errors,
             unknown_commands,
             unknown_chars,
+            failures,
         },
     }
 }
@@ -333,6 +357,47 @@ fn error_nodes(root: &SyntaxNode) -> impl Iterator<Item = SyntaxNode> + use<> {
         .filter(|n| n.kind() == SyntaxKind::ERROR)
         .collect::<Vec<_>>()
         .into_iter()
+}
+
+/// Describes the failure point: the token the parser stopped at, and the
+/// innermost node that had been opened around it.
+fn failure_signature(root: &SyntaxNode, at: rowan::TextSize) -> Signature {
+    let token = root
+        .token_at_offset(at)
+        .right_biased()
+        .filter(|t| !t.kind().is_trivia());
+
+    let parent = token
+        .as_ref()
+        .and_then(|t| t.parent())
+        .map(|p| format!("{:?}", p.kind()))
+        .unwrap_or_else(|| "<root>".to_string());
+
+    let token = match token {
+        Some(t) if t.kind().is_keyword() || t.kind().is_symbol() => {
+            format!("{:?} {:?}", t.kind(), t.text())
+        }
+        Some(t) => format!("{:?}", t.kind()),
+        None => "<eof>".to_string(),
+    };
+
+    Signature { parent, token }
+}
+
+/// The source line containing `offset`, trimmed and length-capped.
+fn line_at(src: &str, offset: usize) -> String {
+    let start = src[..offset.min(src.len())]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let rest = &src[start..];
+    let end = rest.find('\n').unwrap_or(rest.len());
+    let line = rest[..end].trim();
+    let mut out: String = line.chars().take(96).collect();
+    if line.chars().count() > 96 {
+        out.push('…');
+    }
+    out
 }
 
 /// Describes an unparsable region in a way that groups with its peers.
