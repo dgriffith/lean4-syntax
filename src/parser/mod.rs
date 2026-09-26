@@ -93,7 +93,10 @@ fn recover<'a>(inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>, base: u32) -> Frag
     inp.skip();
     kids.push(Frag::Token(idx));
     while let Some(t) = inp.peek() {
-        if t.col <= base && command::is_command_start(t.kind) {
+        // A column-0 token starts new top-level syntax even when its kind is
+        // not a recognised command keyword, which is what keeps one failed
+        // declaration from swallowing the ones after it.
+        if t.col <= base && (command::is_command_start(t.kind) || t.col == 0) {
             break;
         }
         let idx = *inp.cursor().inner();
