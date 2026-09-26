@@ -1,6 +1,6 @@
 //! Tree-shape tests: precedence, layout, and error recovery.
 
-use lean4_syntax::ast::{AstNode, Command, HasDecl, SourceFile};
+use lean4_syntax::ast::{AstNode, Command, HasDecl, SourceFile, TacticSeq};
 use lean4_syntax::syntax::sexpr;
 
 /// Parses `src` as the body of a definition and returns the body's shape.
@@ -142,22 +142,21 @@ theorem t (p q : Prop) (hp : p) (hq : q) : p ∧ q := by
 ";
     let parse = lean4_syntax::parse(src);
     assert!(parse.ok(), "{:?}", parse.errors());
-    let tactics: Vec<_> = parse
+    let seqs: Vec<_> = parse
         .syntax()
         .descendants()
         .filter(|n| n.kind() == lean4_syntax::SyntaxKind::TACTIC_SEQ)
         .collect();
-    // Outer block has two tactics; the inner block has one.
-    let outer = &tactics[0];
+    // The outer block holds `have` and `exact`; the inner holds only `exact hp`.
+    let outer = TacticSeq::cast(seqs[0].clone()).expect("a tactic sequence");
+    let inner = TacticSeq::cast(seqs[1].clone()).expect("a nested tactic sequence");
     assert_eq!(
-        outer
-            .children()
-            .filter(|n| n.kind() == lean4_syntax::SyntaxKind::TACTIC)
-            .count(),
+        outer.tactics().count(),
         2,
         "outer block should hold `have` and `exact`:\n{}",
-        sexpr(outer)
+        sexpr(&seqs[0])
     );
+    assert_eq!(inner.tactics().count(), 1);
 }
 
 #[test]

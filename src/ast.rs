@@ -631,8 +631,10 @@ ast_node!(
     TACTIC_SEQ
 );
 ast_node!(
-    /// A single tactic.
-    Tactic,
+    /// A tactic with no shape of its own: either one taking no arguments
+    /// (`rfl`, `trivial`) or one this parser does not model. Its name token
+    /// says which tactic it is.
+    GenericTactic,
     TACTIC
 );
 ast_node!(
@@ -656,9 +658,136 @@ ast_node!(
     TACTIC_COMBINATOR
 );
 ast_node!(
-    /// A tactic's uninterpreted arguments.
+    /// Tactic syntax that was kept but not interpreted.
     TacticArgs,
     TACTIC_ARGS
+);
+
+ast_node!(
+    /// `simp only [foo, ← bar] at h ⊢` and the other simp-like tactics.
+    TacticSimp,
+    TACTIC_SIMP
+);
+ast_node!(
+    /// `rw [foo, ← bar] at h`
+    TacticRewrite,
+    TACTIC_REWRITE
+);
+ast_node!(
+    /// A tactic taking one term, such as `exact` or `apply`.
+    TacticTerm,
+    TACTIC_TERM
+);
+ast_node!(
+    /// A tactic taking a comma-separated term list, such as `use`.
+    TacticTermList,
+    TACTIC_TERM_LIST
+);
+ast_node!(
+    /// `intro x y ⟨a, b⟩`
+    TacticIntro,
+    TACTIC_INTRO
+);
+ast_node!(
+    /// `cases`, `rcases`, `induction` — a target and an optional `with`.
+    TacticCases,
+    TACTIC_CASES
+);
+ast_node!(
+    /// `have h : T := e`, `obtain ⟨a, b⟩ := e`, `set x := e`.
+    TacticHave,
+    TACTIC_HAVE
+);
+ast_node!(
+    /// `case inl h => …`, `next x => …`
+    TacticCase,
+    TACTIC_CASE
+);
+ast_node!(
+    /// `conv at h => …`
+    TacticConv,
+    TACTIC_CONV
+);
+ast_node!(
+    /// `show T`
+    TacticShow,
+    TACTIC_SHOW
+);
+ast_node!(
+    /// A `calc` block in tactic position.
+    TacticCalc,
+    TACTIC_CALC
+);
+ast_node!(
+    /// `all_goals …`, `try …`, `repeat …`, `iterate 3 …`
+    TacticCombinatorApp,
+    TACTIC_COMBINATOR_APP
+);
+
+ast_node!(
+    /// `at h₁ h₂ ⊢` or `at *`
+    Location,
+    LOCATION
+);
+ast_node!(
+    /// The bracketed argument list of a simp-like tactic.
+    SimpArgList,
+    SIMP_ARG_LIST
+);
+ast_node!(
+    /// One entry of a simp argument list.
+    SimpArg,
+    SIMP_ARG
+);
+ast_node!(
+    /// The bracketed rule list of a rewrite-like tactic.
+    RwRuleList,
+    RW_RULE_LIST
+);
+ast_node!(
+    /// One rewrite rule, possibly reversed with `←`.
+    RwRule,
+    RW_RULE
+);
+ast_node!(
+    /// `(config := …)`, kept but not interpreted.
+    TacticConfig,
+    TACTIC_CONFIG
+);
+ast_node!(
+    /// The targets of a `cases`-like tactic.
+    TacticTargets,
+    TACTIC_TARGETS
+);
+ast_node!(
+    /// A `using` clause, naming a recursor.
+    UsingClause,
+    USING_CLAUSE
+);
+ast_node!(
+    /// A `with` clause, carrying either alternatives or patterns.
+    WithClause,
+    WITH_CLAUSE
+);
+ast_node!(
+    /// The goal tags named by `case` or `next`.
+    CaseArgs,
+    CASE_ARGS
+);
+ast_node!(
+    /// A leaf `rcases` pattern: a name, `_`, `-`, or `@h`.
+    RcasesPat,
+    RCASES_PAT
+);
+ast_node!(
+    /// `⟨a, b⟩` or `(a, b)` in a pattern.
+    RcasesTuple,
+    RCASES_TUPLE
+);
+ast_node!(
+    /// `a | b` in a pattern.
+    RcasesAlt,
+    RCASES_ALT
 );
 
 // ---- Enums -----------------------------------------------------------------
@@ -761,6 +890,41 @@ ast_enum!(
         Cdot(CdotTerm),
         Calc(CalcTerm),
         Quoted(QuotedTerm),
+    }
+);
+
+ast_enum!(
+    /// Any tactic.
+    ///
+    /// Matching on this is exhaustive, so adding a shape later surfaces every
+    /// site that needs updating.
+    Tactic {
+        Simp(TacticSimp),
+        Rewrite(TacticRewrite),
+        Term(TacticTerm),
+        TermList(TacticTermList),
+        Intro(TacticIntro),
+        Cases(TacticCases),
+        Have(TacticHave),
+        Case(TacticCase),
+        Conv(TacticConv),
+        Show(TacticShow),
+        Calc(TacticCalc),
+        CombinatorApp(TacticCombinatorApp),
+        Focus(TacticFocus),
+        Alt(TacticAlt),
+        Bracketed(TacticSeqBracketed),
+        Chain(TacticCombinator),
+        Generic(GenericTactic),
+    }
+);
+
+ast_enum!(
+    /// A `rcases` / `rintro` / `obtain` pattern.
+    RcasesPattern {
+        Pat(RcasesPat),
+        Tuple(RcasesTuple),
+        Alt(RcasesAlt),
     }
 );
 
@@ -1193,35 +1357,405 @@ impl ByTerm {
 
 impl TacticSeq {
     /// The tactics in the block, in order.
-    pub fn tactics(&self) -> impl Iterator<Item = SyntaxNode> + use<> {
-        self.syntax().children().filter(|n| {
-            matches!(
-                n.kind(),
-                TACTIC | TACTIC_FOCUS | TACTIC_SEQ_BRACKETED | TACTIC_ALT | TACTIC_COMBINATOR
-            )
-        })
+    pub fn tactics(&self) -> impl Iterator<Item = Tactic> + use<> {
+        children(self.syntax())
     }
 }
 
+/// The first `Term` child appearing after a token of the given kind.
+///
+/// Tactic shapes often have several direct `Term` children — a `have` may carry
+/// both a `:= value` and a `from` proof — so position relative to the
+/// introducing token is what distinguishes them.
+fn term_after(parent: &SyntaxNode, after: SyntaxKind) -> Option<Term> {
+    let mut seen = false;
+    for child in parent.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Token(t) if t.kind() == after => seen = true,
+            rowan::NodeOrToken::Node(n) if seen => {
+                if let Some(term) = Term::cast(n) {
+                    return Some(term);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The name and unmodelled remainder shared by every tactic shape.
+pub trait HasTacticName: AstNode {
+    /// The token naming this tactic.
+    fn name(&self) -> Option<SyntaxToken> {
+        self.syntax()
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|t| !t.kind().is_trivia())
+    }
+
+    /// The tactic's name with Lean's `?` and `!` suffixes removed, so `simp?`
+    /// reads as `simp`.
+    fn base_name(&self) -> Option<String> {
+        self.name()
+            .map(|t| t.text().trim_end_matches(['?', '!']).to_string())
+    }
+
+    /// Syntax this shape did not interpret. Non-empty means the tactic used a
+    /// form the grammar does not yet model.
+    fn unmodeled(&self) -> Option<TacticArgs> {
+        child(self.syntax())
+    }
+}
+
+impl HasTacticName for TacticSimp {}
+impl HasTacticName for TacticRewrite {}
+impl HasTacticName for TacticTerm {}
+impl HasTacticName for TacticTermList {}
+impl HasTacticName for TacticIntro {}
+impl HasTacticName for TacticCases {}
+impl HasTacticName for TacticHave {}
+impl HasTacticName for TacticCase {}
+impl HasTacticName for TacticConv {}
+impl HasTacticName for TacticShow {}
+impl HasTacticName for TacticCalc {}
+impl HasTacticName for TacticCombinatorApp {}
+impl HasTacticName for GenericTactic {}
+
 impl Tactic {
-    /// The tactic's leading token, which names it.
+    /// The token naming this tactic, where it has one.
     pub fn name(&self) -> Option<SyntaxToken> {
         self.syntax()
             .children_with_tokens()
             .filter_map(|it| it.into_token())
-            .next()
+            .find(|t| !t.kind().is_trivia())
     }
 
-    /// The tactic's uninterpreted arguments.
+    /// The name with `?` and `!` suffixes removed.
+    pub fn base_name(&self) -> Option<String> {
+        self.name()
+            .map(|t| t.text().trim_end_matches(['?', '!']).to_string())
+    }
+
+    /// Where the tactic acts, for the shapes that accept a location.
+    pub fn location(&self) -> Option<Location> {
+        child(self.syntax())
+    }
+}
+
+impl Location {
+    /// True for `at *`.
+    pub fn is_everywhere(&self) -> bool {
+        token(self.syntax(), STAR).is_some()
+    }
+
+    /// True if the goal itself is included, written `⊢`.
+    pub fn includes_goal(&self) -> bool {
+        token(self.syntax(), TURNSTILE).is_some() || token(self.syntax(), TURNSTILE_ASCII).is_some()
+    }
+
+    /// The named hypotheses.
+    pub fn hypotheses(&self) -> impl Iterator<Item = SyntaxToken> + use<> {
+        self.syntax()
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|t| t.kind() == IDENT)
+    }
+}
+
+impl SimpArg {
+    /// True for `*`, which admits all hypotheses.
+    pub fn is_wildcard(&self) -> bool {
+        token(self.syntax(), STAR).is_some()
+    }
+
+    /// True for `← foo`, rewriting right to left.
+    pub fn is_reversed(&self) -> bool {
+        child::<RwRule>(self.syntax()).is_some_and(|r| r.is_reversed())
+    }
+
+    /// True for `-foo`, removing a lemma from the simp set.
+    pub fn is_removed(&self) -> bool {
+        child::<RwRule>(self.syntax()).is_some_and(|r| token(r.syntax(), MINUS).is_some())
+    }
+
+    /// The lemma itself.
+    pub fn term(&self) -> Option<Term> {
+        self.syntax().descendants().find_map(Term::cast)
+    }
+}
+
+impl RwRule {
+    /// True for `← foo`, rewriting right to left.
+    pub fn is_reversed(&self) -> bool {
+        token(self.syntax(), LEFT_ARROW).is_some()
+            || token(self.syntax(), LEFT_ARROW_ASCII).is_some()
+    }
+
+    /// The rule itself.
+    pub fn term(&self) -> Option<Term> {
+        child(self.syntax())
+    }
+}
+
+impl TacticSimp {
+    /// True if written `simp only`, restricting the simp set.
+    pub fn is_only(&self) -> bool {
+        token(self.syntax(), KW_ONLY).is_some()
+    }
+
+    /// `(config := …)`, if given.
+    pub fn config(&self) -> Option<TacticConfig> {
+        child(self.syntax())
+    }
+
+    /// The bracketed lemma arguments.
+    pub fn args(&self) -> impl Iterator<Item = SimpArg> + use<> {
+        child::<SimpArgList>(self.syntax())
+            .into_iter()
+            .flat_map(|list| children::<SimpArg>(list.syntax()).collect::<Vec<_>>())
+    }
+
+    /// Where the tactic acts.
+    pub fn location(&self) -> Option<Location> {
+        child(self.syntax())
+    }
+}
+
+impl TacticRewrite {
+    /// The rewrite rules, in order.
+    pub fn rules(&self) -> impl Iterator<Item = RwRule> + use<> {
+        child::<RwRuleList>(self.syntax())
+            .into_iter()
+            .flat_map(|list| children::<RwRule>(list.syntax()).collect::<Vec<_>>())
+    }
+
+    /// The occurrence selected by `nth_rw 2 [...]`.
+    pub fn occurrence(&self) -> Option<SyntaxToken> {
+        token(self.syntax(), NUMBER)
+    }
+
+    /// Where the tactic acts.
+    pub fn location(&self) -> Option<Location> {
+        child(self.syntax())
+    }
+}
+
+impl TacticTerm {
+    /// The term the tactic is applied to.
+    pub fn term(&self) -> Option<Term> {
+        child(self.syntax())
+    }
+
+    /// Where the tactic acts.
+    pub fn location(&self) -> Option<Location> {
+        child(self.syntax())
+    }
+}
+
+impl TacticTermList {
+    /// The terms supplied, in order.
+    pub fn terms(&self) -> impl Iterator<Item = Term> + use<> {
+        children(self.syntax())
+    }
+}
+
+impl TacticIntro {
+    /// The patterns introduced.
+    pub fn patterns(&self) -> impl Iterator<Item = RcasesPattern> + use<> {
+        children(self.syntax())
+    }
+}
+
+impl TacticCases {
+    /// The terms being analysed.
+    pub fn targets(&self) -> impl Iterator<Item = Term> + use<> {
+        child::<TacticTargets>(self.syntax())
+            .into_iter()
+            .flat_map(|t| children::<Term>(t.syntax()).collect::<Vec<_>>())
+    }
+
+    /// The recursor named by `using`.
+    pub fn using_term(&self) -> Option<Term> {
+        self.syntax()
+            .children()
+            .filter_map(UsingClause::cast)
+            .find(|u| token(u.syntax(), KW_USING).is_some())
+            .and_then(|u| child(u.syntax()))
+    }
+
+    /// The hypotheses reverted by `generalizing`.
+    pub fn generalizing(&self) -> impl Iterator<Item = SyntaxToken> + use<> {
+        self.syntax()
+            .children()
+            .filter_map(UsingClause::cast)
+            .filter(|u| token(u.syntax(), KW_GENERALIZING).is_some())
+            .flat_map(|u| {
+                u.syntax()
+                    .children_with_tokens()
+                    .filter_map(|it| it.into_token())
+                    .filter(|t| t.kind() == IDENT)
+                    .collect::<Vec<_>>()
+            })
+    }
+
+    /// Alternatives, for the `with | alt => …` form.
+    pub fn alts(&self) -> impl Iterator<Item = MatchAlt> + use<> {
+        child::<WithClause>(self.syntax())
+            .and_then(|w| child::<MatchAlts>(w.syntax()))
+            .into_iter()
+            .flat_map(|alts| children::<MatchAlt>(alts.syntax()).collect::<Vec<_>>())
+    }
+
+    /// Patterns, for the `with ⟨a, b⟩` form.
+    pub fn patterns(&self) -> impl Iterator<Item = RcasesPattern> + use<> {
+        child::<WithClause>(self.syntax())
+            .and_then(|w| child::<Patterns>(w.syntax()))
+            .into_iter()
+            .flat_map(|p| children::<RcasesPattern>(p.syntax()).collect::<Vec<_>>())
+    }
+}
+
+impl TacticHave {
+    /// The name or pattern being introduced.
+    pub fn pattern(&self) -> Option<RcasesPattern> {
+        child(self.syntax())
+    }
+
+    /// The stated type.
+    pub fn ty(&self) -> Option<Term> {
+        child::<TypeSpec>(self.syntax()).and_then(|it| it.ty())
+    }
+
+    /// The proof supplied with `:=`, if any. A tactic-mode `have` may omit it,
+    /// leaving the statement as a new goal.
+    pub fn value(&self) -> Option<Term> {
+        term_after(self.syntax(), COLON_EQ)
+    }
+
+    /// The proof supplied with `from`, if any.
+    pub fn from_term(&self) -> Option<Term> {
+        term_after(self.syntax(), KW_FROM)
+    }
+}
+
+impl TacticCase {
+    /// The goal tags named.
+    pub fn tags(&self) -> impl Iterator<Item = SyntaxToken> + use<> {
+        child::<CaseArgs>(self.syntax())
+            .into_iter()
+            .flat_map(|args| {
+                args.syntax()
+                    .children_with_tokens()
+                    .filter_map(|it| it.into_token())
+                    .filter(|t| !t.kind().is_trivia())
+                    .collect::<Vec<_>>()
+            })
+    }
+
+    /// The tactics applied to the named goal.
+    pub fn tactics(&self) -> Option<TacticSeq> {
+        child(self.syntax())
+    }
+}
+
+impl TacticConv {
+    /// Where conversion applies.
+    pub fn location(&self) -> Option<Location> {
+        child(self.syntax())
+    }
+
+    /// The subterm selected by `in`.
+    pub fn pattern(&self) -> Option<Term> {
+        term_after(self.syntax(), KW_IN)
+    }
+
+    /// The conversion steps.
+    pub fn tactics(&self) -> Option<TacticSeq> {
+        child(self.syntax())
+    }
+}
+
+impl TacticShow {
+    /// The restated goal.
+    pub fn term(&self) -> Option<Term> {
+        child(self.syntax())
+    }
+}
+
+impl TacticCombinatorApp {
+    /// The repeat count, for `iterate 3 …`.
+    pub fn count(&self) -> Option<SyntaxToken> {
+        token(self.syntax(), NUMBER)
+    }
+
+    /// The tactics being controlled.
+    pub fn tactics(&self) -> Option<TacticSeq> {
+        child(self.syntax())
+    }
+}
+
+impl TacticFocus {
+    /// The tactics applied to the focused goal.
+    pub fn tactics(&self) -> Option<TacticSeq> {
+        child(self.syntax())
+    }
+}
+
+impl TacticAlt {
+    /// The alternatives tried in order.
+    pub fn alternatives(&self) -> impl Iterator<Item = TacticSeq> + use<> {
+        children(self.syntax())
+    }
+}
+
+impl TacticSeqBracketed {
+    /// The bracketed tactics.
+    pub fn tactics(&self) -> Option<TacticSeq> {
+        child(self.syntax())
+    }
+}
+
+impl TacticCombinator {
+    /// The tactics chained with `<;>`.
+    pub fn tactics(&self) -> impl Iterator<Item = Tactic> + use<> {
+        children(self.syntax())
+    }
+}
+
+impl GenericTactic {
+    /// Syntax this tactic carried but the parser did not interpret.
     pub fn args(&self) -> Option<TacticArgs> {
         child(self.syntax())
     }
 
-    /// Structured alternatives, as in `induction n with | zero => …`.
+    /// Alternatives, as in `induction n with | zero => …` on an unmodelled
+    /// tactic.
     pub fn alts(&self) -> impl Iterator<Item = MatchAlt> + use<> {
         child::<MatchAlts>(self.syntax())
             .into_iter()
             .flat_map(|alts| children::<MatchAlt>(alts.syntax()).collect::<Vec<_>>())
+    }
+}
+
+impl RcasesPattern {
+    /// The name bound, for a leaf pattern.
+    pub fn name(&self) -> Option<SyntaxToken> {
+        token(self.syntax(), IDENT)
+    }
+
+    /// True for `_`.
+    pub fn is_hole(&self) -> bool {
+        token(self.syntax(), UNDERSCORE).is_some()
+    }
+
+    /// True for `-`, which clears the hypothesis.
+    pub fn is_discard(&self) -> bool {
+        matches!(self, RcasesPattern::Pat(_)) && token(self.syntax(), MINUS).is_some()
+    }
+
+    /// Nested patterns, for tuples and alternations.
+    pub fn parts(&self) -> impl Iterator<Item = RcasesPattern> + use<> {
+        children(self.syntax())
     }
 }
 

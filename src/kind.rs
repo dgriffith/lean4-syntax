@@ -192,6 +192,13 @@ kinds! {
         KW_BREAK = "break",
         KW_CONTINUE = "continue",
         KW_FIRST = "first",
+        // Lean keeps one global token table, so words introduced by tactic
+        // syntax are reserved everywhere rather than being identifiers that
+        // happen to appear in tactic position. Without this, `induction xs
+        // using List.rec` reads `using` as an argument of `xs`.
+        KW_ONLY = "only",
+        KW_USING = "using",
+        KW_GENERALIZING = "generalizing",
     }
 
     // NOTE: order here is irrelevant; the lexer sorts by length descending.
@@ -296,6 +303,8 @@ kinds! {
         SEQ_FOCUS = "<;>",
         PIPE_RIGHT_DOT = "|>.",
         // Misc.
+        TURNSTILE = "\u{22a2}",   // ⊢
+        TURNSTILE_ASCII = "|-",
         SLASH_SLASH = "//",
         TICK = "'",
         BACKTICK = "`",
@@ -448,6 +457,36 @@ kinds! {
         TACTIC_ALT,
         TACTIC_ARGS,
         TACTIC_COMBINATOR,
+        // Structured tactic shapes. There is deliberately one node per
+        // *shape* rather than one per tactic name: the name token identifies
+        // the tactic, while the shape says how to reach its parts.
+        TACTIC_SIMP,
+        TACTIC_REWRITE,
+        TACTIC_TERM,
+        TACTIC_TERM_LIST,
+        TACTIC_INTRO,
+        TACTIC_CASES,
+        TACTIC_HAVE,
+        TACTIC_CASE,
+        TACTIC_CONV,
+        TACTIC_SHOW,
+        TACTIC_CALC,
+        TACTIC_COMBINATOR_APP,
+        // Parts shared by those shapes.
+        LOCATION,
+        SIMP_ARG_LIST,
+        SIMP_ARG,
+        RW_RULE_LIST,
+        RW_RULE,
+        TACTIC_CONFIG,
+        TACTIC_TARGETS,
+        USING_CLAUSE,
+        WITH_CLAUSE,
+        CASE_ARGS,
+        // `rcases` / `rintro` / `obtain` patterns.
+        RCASES_PAT,
+        RCASES_TUPLE,
+        RCASES_ALT,
         // Recovery.
         ERROR,
     }
