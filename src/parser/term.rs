@@ -193,6 +193,9 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         tok_in(&[NUMBER, SCIENTIFIC, STRING, RAW_STRING, CHAR, NAME_LIT]),
     );
     let hole = node(HOLE, tok(UNDERSCORE));
+    // `(f ..)` leaves the remaining arguments to be inferred. Requiring
+    // whitespace keeps `a..b` a range rather than two arguments.
+    let ellipsis = node(HOLE, spaced_tok(DOT_DOT));
     // `?x` and `?_` — the latter is how `refine` marks the holes it leaves.
     let synthetic_hole = node(
         SYNTHETIC_HOLE,
@@ -253,6 +256,18 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     .at_least(1)
                     .collect::<Vec<_>>(),
                 tok(COMMA).or_not(),
+                tok(R_PAREN),
+            )),
+        ),
+        // An operator section: `(↑)`, `(· + ·)`'s cousin for a bare operator.
+        node(
+            PAREN_TERM,
+            group((
+                tok(L_PAREN),
+                node(
+                    SYMBOL_TERM,
+                    any_tok_if(|k| k.is_symbol() && !k.is_delimiter()),
+                ),
                 tok(R_PAREN),
             )),
         ),
@@ -446,6 +461,19 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             SET_LIT,
             group((tok(L_BRACE), comma_terms.clone(), tok(R_BRACE))),
         ),
+        // Structure instances mixing assignments with field abbreviations:
+        // `{ cmd := c, args, env }` means `args := args, env := env`. Placed
+        // after `SET_LIT` so `{a, b}` stays a set literal — the two forms are
+        // genuinely ambiguous in surface syntax, and Lean separates them by
+        // expected type, which a parser does not have.
+        node(
+            STRUCT_INST,
+            group((
+                tok(L_BRACE),
+                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[COMMA], false),
+                tok(R_BRACE),
+            )),
+        ),
     ));
 
     // ---- Binding and control atoms ----------------------------------------
@@ -554,7 +582,17 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         node(DECL_EQNS, match_alts(g)),
     ));
 
-    let let_term = node(
+    // Lean anchors these at the keyword: the value's continuation must be
+    // indented past it, and the body need only reach it. Without that anchor
+    // the threshold is the enclosing command's column, and
+    //
+    // ```lean
+    //   have ⟨t, ht⟩ := normalize l t
+    //   ⟨t, by simp⟩
+    // ```
+    //
+    // reads the body as one more argument of `normalize`.
+    let let_term = with_position(node(
         LET_TERM,
         group((
             tok(KW_LET),
@@ -565,12 +603,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(SEMICOLON).or_not(),
             term.clone(),
         )),
-    );
+    ));
 
-    let have_term = node(
+    let have_term = with_position(node(
         HAVE_TERM,
         group((
-            tok(KW_HAVE),
+            // mathlib's `haveI`/`letI` introduce instances and are ordinary
+            // identifiers, not keywords, but take the same shape.
+            choice((tok(KW_HAVE), tactic_name(&["haveI", "letI"]))),
             let_lhs.clone().or_not(),
             type_spec(g).or_not(),
             tok(COLON_EQ),
@@ -578,12 +618,12 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(SEMICOLON).or_not(),
             term.clone(),
         )),
-    );
+    ));
 
     let by_term = node(BY_TERM, group((tok(KW_BY), g.tactic_seq.clone())));
 
     // `show T from e` and `show T by tac` are both proofs of the restatement.
-    let show_term = node(
+    let show_term = with_position(node(
         SHOW_TERM,
         group((
             tok(KW_SHOW),
@@ -595,9 +635,9 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             ))
             .or_not(),
         )),
-    );
+    ));
 
-    let suffices_term = node(
+    let suffices_term = with_position(node(
         SUFFICES_TERM,
         group((
             tok(KW_SUFFICES),
@@ -610,7 +650,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             ))
             .or_not(),
         )),
-    );
+    ));
 
     // `match h : e, e' with | …`
     let discr = group((group((tok(IDENT), tok(COLON))).or_not(), term.clone())).map(|(h, t)| {
@@ -730,6 +770,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         dot_ident,
         cdot,
         hole,
+        ellipsis,
         reference,
         constant_term,
     ))

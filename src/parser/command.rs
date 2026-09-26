@@ -364,7 +364,15 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 .repeated()
                 .collect::<Vec<_>>(),
             tok(KW_IMPORT),
-            tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+            // The `col_gt` guard keeps an ident-led command on the next line
+            // from being read as another module name: without it,
+            // `import A.B` followed by `deprecated_module (…)` swallows the
+            // command's name.
+            col_gt()
+                .ignore_then(tok(IDENT))
+                .repeated()
+                .at_least(1)
+                .collect::<Vec<_>>(),
         )),
     );
 
@@ -426,7 +434,11 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         UNIVERSE_CMD,
         group((
             tok(KW_UNIVERSE),
-            tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+            col_gt()
+                .ignore_then(tok(IDENT))
+                .repeated()
+                .at_least(1)
+                .collect::<Vec<_>>(),
         )),
     );
 
@@ -454,7 +466,10 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 COMMA,
             ),
             tok(R_BRACKET),
-            tok(IDENT).repeated().collect::<Vec<_>>(),
+            col_gt()
+                .ignore_then(tok(IDENT))
+                .repeated()
+                .collect::<Vec<_>>(),
             group((tok(KW_IN), cmd.clone())).or_not(),
         )),
     );
@@ -589,12 +604,17 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // declarations after it. Requiring a leading identifier keeps it from
     // claiming the fragments left behind by a failed parse, which begin with
     // punctuation far more often.
+    // Reusing `modifiers` lets an unrecognised command carry a docstring,
+    // attributes and scope modifiers, which mathlib relies on:
+    //
+    // ```lean
+    // @[deprecated (since := "2026-07-09")]
+    // alias setOf_odd_degree_eq := setOfPred_odd_degree_eq
+    // ```
     let unknown_cmd = node(
         UNKNOWN_CMD,
         group((
-            tok_in(&[KW_LOCAL, KW_SCOPED])
-                .repeated()
-                .collect::<Vec<_>>(),
+            modifiers.clone(),
             tok(IDENT),
             balanced_run(RAW_TOKENS, never, true),
         )),

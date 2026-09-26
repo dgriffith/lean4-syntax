@@ -157,7 +157,12 @@ known precedence from an assumed one, rather than silently trusting a guess.
   curated table parses at a default precedence rather than its declared one.
   This is visible in the tree (see Notation) rather than silent.
 - **`|x|` is not supported.** Absolute value would collide with `|` as used by
-  match alternatives and `rcases` patterns.
+  match alternatives and `rcases` patterns — the leading cause of the remaining
+  failures, and not cheaply fixable.
+- **`{a, b}` is read as a set literal**, never as a structure instance with
+  abbreviated fields. The two are ambiguous in surface syntax and Lean separates
+  them by expected type, which a parser does not have. A brace form with at
+  least one `x := e` field does support abbreviation.
 - **Big terms are not bare application arguments.** Lean restricts arguments to
   maximal precedence, and this parser follows it, with a trailing lambda as the
   one exception (`xs.map fun x => x + 1` works). So `f do …` needs
@@ -182,14 +187,15 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 30.8% |
+| Files parsing with no errors | 46.1% |
 | Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% as the gaps below were closed.
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% as the gaps below were
+closed.
 Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
 that rate, are now down to 0.5%.
 
@@ -209,6 +215,14 @@ newline-separated structure instance fields, structure fields with binders,
 it modifies — named arguments `f (p := e)`, `$x` antiquotations, and `ℕ+` and
 `→+`, which are single tokens in Lean rather than an identifier or arrow plus
 `+`. The corpus files and `tests/corpus_forms.rs` keep all of them fixed.
+
+Several were *layout* bugs, which matter more than their counts: each construct
+parsed in isolation and failed in place. An unguarded `repeated()` crossing a
+line break is the shape they share — `have ⟨t, ht⟩ := f x` absorbing its own
+body as one more argument of `f`, `intros` claiming the next line's tactic as a
+pattern, `import A.B` swallowing the following command's name as a module. The
+rule they all needed is the one application arguments already had: a
+continuation must be indented past the position its construct was anchored at.
 
 ```
 cargo run --release --example corpus_report -- path/to/mathlib4

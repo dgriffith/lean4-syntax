@@ -128,7 +128,7 @@ const CASES_LIKE: &[&str] = &[
 /// with the pattern it destructures into, where `rcases h with p` leads with
 /// the target `h`. Distinguishing them by name avoids an ambiguity that
 /// position alone cannot resolve.
-const HAVE_LIKE: &[&str] = &["replace", "set", "obtain"];
+const HAVE_LIKE: &[&str] = &["replace", "set", "obtain", "letI", "haveI"];
 
 /// Name a goal and focus it.
 const CASE_LIKE: &[&str] = &["case", "case'", "next"];
@@ -383,11 +383,24 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `intro x y ⟨a, b⟩`
+    // The `col_gt` guard matters as much here as it does for application
+    // arguments. Without it,
+    //
+    // ```lean
+    //   simp only [foo]; intros
+    //   constructor <;> (symm; assumption)
+    // ```
+    //
+    // reads `constructor` as a pattern of `intros`, because `intros` sits
+    // mid-line and the next line is dedented relative to it.
     let intro_tactic = node(
         TACTIC_INTRO,
         group((
             tactic_name(INTRO_LIKE),
-            rcases_pat(g).repeated().collect::<Vec<_>>(),
+            col_gt()
+                .ignore_then(rcases_pat(g))
+                .repeated()
+                .collect::<Vec<_>>(),
             trailing.clone(),
         )),
     );
@@ -428,7 +441,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tactic_name(HAVE_LIKE),
             )),
             rcases_pat(g).or_not(),
-            binders(g).or_not(),
+            col_gt().ignore_then(binders(g)).or_not(),
             type_spec(g).or_not(),
             group((tok(COLON_EQ), term.clone())).or_not(),
             group((tok(KW_FROM), term.clone())).or_not(),
@@ -444,7 +457,8 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tactic_name(CASE_LIKE),
             node(
                 CASE_ARGS,
-                tok_in(&[IDENT, UNDERSCORE, NUMBER])
+                col_gt()
+                    .ignore_then(tok_in(&[IDENT, UNDERSCORE, NUMBER]))
                     .repeated()
                     .collect::<Vec<_>>(),
             ),

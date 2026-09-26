@@ -525,13 +525,14 @@ impl<'a> Lexer<'a> {
                 // linear-map arrow, `→+` the additive-monoid hom, `⁻¹'` the
                 // preimage. Restricted to non-ASCII base symbols so that `a +`
                 // and `x *` are unaffected.
-                let decorated = !kind.is_delimiter()
-                    && !text.is_ascii()
-                    && self
-                        .peek()
-                        .is_some_and(|c| is_modifier(c) || matches!(c, '+' | '*' | '\''));
-                if decorated {
-                    self.bump_while(|c| is_modifier(c) || matches!(c, '+' | '*' | '\''));
+                // A modifier decorates any operator — `~ᵤ` is `Associated`,
+                // `=ᵐ` almost-everywhere equality. The ASCII suffixes `+ * '`
+                // decorate only a non-ASCII base, so `a + b` and `x * y` are
+                // untouched.
+                let decorates =
+                    |c: char| is_modifier(c) || (!text.is_ascii() && matches!(c, '+' | '*' | '\''));
+                if !kind.is_delimiter() && self.peek().is_some_and(decorates) {
+                    self.bump_while(decorates);
                     return SyntaxKind::SYMBOL;
                 }
                 return *kind;
