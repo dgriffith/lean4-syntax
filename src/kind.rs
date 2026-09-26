@@ -52,6 +52,40 @@ macro_rules! kinds {
                 matches!(self, $(Self::$kw)|*)
             }
 
+            /// True for a bracket or delimiter.
+            ///
+            /// Delimiters never take a modifier suffix: in `‖x‖₊` the `₊`
+            /// modifies the whole bracketed term, so absorbing it into the
+            /// closing `‖` would leave the pair unclosed.
+            pub fn is_delimiter(self) -> bool {
+                matches!(
+                    self,
+                    Self::L_PAREN
+                        | Self::R_PAREN
+                        | Self::L_BRACE
+                        | Self::R_BRACE
+                        | Self::L_BRACKET
+                        | Self::R_BRACKET
+                        | Self::L_ANGLE_ANON
+                        | Self::R_ANGLE_ANON
+                        | Self::L_STRICT_IMPLICIT
+                        | Self::R_STRICT_IMPLICIT
+                        | Self::L_DOUBLE_BRACKET
+                        | Self::R_DOUBLE_BRACKET
+                        | Self::L_ANON_HAVE
+                        | Self::R_ANON_HAVE
+                        | Self::NORM_BAR
+                        | Self::L_FLOOR
+                        | Self::R_FLOOR
+                        | Self::L_CEIL
+                        | Self::R_CEIL
+                        | Self::L_ANGLE_INNER
+                        | Self::R_ANGLE_INNER
+                        | Self::L_LIE
+                        | Self::R_LIE
+                )
+            }
+
             /// True for punctuation and operator tokens.
             pub fn is_symbol(self) -> bool {
                 matches!(self, $(Self::$sym)|*)
@@ -93,6 +127,12 @@ kinds! {
     }
 
     literals {
+        // A notation character the parser has no specific rule for. Usable as
+        // an atom, or as an infix operator at an assumed precedence.
+        SYMBOL,
+        // A run of superscript or subscript modifier letters, which Lean
+        // notation uses exclusively as postfix: `sᶜ`, `Xᵒᵖ`, `‖x‖₊`.
+        MODIFIER,
         NUMBER,
         SCIENTIFIC,
         STRING,
@@ -318,6 +358,47 @@ kinds! {
         // Misc.
         TURNSTILE = "\u{22a2}",   // ⊢
         TURNSTILE_ASCII = "|-",
+        // Curated notation, ranked by frequency in mathlib. These need real
+        // rules rather than the generic fallback: delimiters come in pairs,
+        // big operators bind variables, and the operators below have
+        // precedences that matter.
+        NORM_BAR = "\u{2016}",        // ‖  (30830 uses)
+        L_FLOOR = "\u{230a}",         // ⌊
+        R_FLOOR = "\u{230b}",         // ⌋
+        L_CEIL = "\u{2308}",          // ⌈
+        R_CEIL = "\u{2309}",          // ⌉
+        L_ANGLE_INNER = "\u{27ea}",   // ⟪
+        R_ANGLE_INNER = "\u{27eb}",   // ⟫
+        BIG_SUM = "\u{2211}",         // ∑
+        BIG_PROD = "\u{220f}",        // ∏
+        BIG_UNION = "\u{22c3}",       // ⋃
+        BIG_INTER = "\u{22c2}",       // ⋂
+        BIG_SUP = "\u{2a06}",         // ⨆
+        BIG_INF = "\u{2a05}",         // ⨅
+        BIG_OPLUS = "\u{2a01}",       // ⨁
+        BIG_OTIMES = "\u{2a02}",      // ⨂
+        INTEGRAL = "\u{222b}",        // ∫
+        GG = "\u{226b}",              // ≫  (27345 uses)
+        GGG = "\u{22d9}",             // ⋙
+        LONG_ARROW = "\u{27f6}",      // ⟶  (24803 uses)
+        FUNCTOR_ARROW = "\u{2964}",   // ⥤
+        OTIMES = "\u{2297}",          // ⊗
+        CONGR_MOD = "\u{2261}",       // ≡
+        QUOTIENT = "\u{29f8}",        // ⧸
+        // Constant-like notation. These are atoms, so they may appear as
+        // application arguments (`IsOpen ⊤`), unlike a generic symbol, which is
+        // read as an operator.
+        TOP = "\u{22a4}",             // ⊤
+        BOT = "\u{22a5}",             // ⊥
+        EMPTY_SET = "\u{2205}",       // ∅
+        INFINITY = "\u{221e}",        // ∞
+        ONE_MORPH = "\u{1d7d9}",      // 𝟙
+        ZERO_MORPH = "\u{1d7d8}",     // 𝟘
+        IMAGE = "''",
+        TILDE = "~",
+        AMPERSAND = "&",
+        L_LIE = "\u{2045}",           // ⁅
+        R_LIE = "\u{2046}",           // ⁆
         SLASH_SLASH = "//",
         TICK = "'",
         BACKTICK = "`",
@@ -377,6 +458,9 @@ kinds! {
         STRUCT_FIELD_LIST,
         STRUCT_FIELD,
         // Notation commands (recorded, not applied to the grammar).
+        NOTATION_BRACKET,
+        SYMBOL_TERM,
+        OPERATOR,
         NOTATION_CMD,
         MIXFIX_CMD,
         PRECEDENCE,
@@ -447,6 +531,8 @@ kinds! {
         CALC_TERM,
         CALC_STEP,
         NAME_TERM,
+        NAMED_ARG,
+        ANTIQUOTATION,
         QUOTED_TERM,
         MACRO_CALL,
         ARG_LIST,
