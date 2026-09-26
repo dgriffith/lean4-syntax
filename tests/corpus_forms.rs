@@ -226,3 +226,168 @@ fn a_failed_declaration_is_contained_to_itself() {
         "expected a and c to survive, got {names:?}"
     );
 }
+
+// ---- Layout: constructs that parse in isolation but failed in place --------
+
+#[test]
+fn a_have_body_on_the_next_line_is_not_an_argument_of_its_value() {
+    // Lean anchors `have` at its own keyword, so the value's arguments must be
+    // indented past it and the body need only reach it. Anchoring at the
+    // enclosing command instead made the body one more argument of `pair`.
+    let src = "def n : Nat → Nat\n  | 0 => 0\n  | k =>\n    have ⟨t, ht⟩ := pair k\n    t\n";
+    let parse = parse_clean(src);
+    let have = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == HAVE_TERM)
+        .expect("a have term");
+    // Two direct term children: the value and the body, not one big application.
+    let apps = have.children().filter(|n| n.kind() == APP).count();
+    assert_eq!(
+        apps,
+        1,
+        "the value should be the only application:\n{}",
+        sexpr(&have)
+    );
+    assert!(
+        have.children().any(|n| n.kind() == REF),
+        "the body should be a reference of its own:\n{}",
+        sexpr(&have)
+    );
+}
+
+#[test]
+fn let_show_and_suffices_anchor_the_same_way() {
+    parse_clean("def n (k : Nat) : Nat :=\n  let ⟨a, b⟩ := pair k\n  a\n");
+    parse_clean(
+        "theorem t (p : Prop) (hp : p) : p := by\n  suffices h : p by exact h\n  exact hp\n",
+    );
+    parse_clean("theorem t (p : Prop) (hp : p) : p := by\n  show p\n  exact hp\n");
+}
+
+#[test]
+fn a_midline_tactic_does_not_claim_the_next_line() {
+    // `intros` sits mid-line, so the following line is dedented *relative to
+    // it*. Its pattern list needs the same `colGt` guard application arguments
+    // have, or `constructor` becomes one of its patterns.
+    let src = "theorem t (a b : Nat) : a + b = b + a ∧ True := by\n  simp only [Nat.add_comm]; intros\n  constructor <;> (symm; assumption)\n";
+    let parse = parse_clean(src);
+    let intro = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == TACTIC_INTRO)
+        .expect("an intros tactic");
+    assert_eq!(
+        intro
+            .descendants()
+            .filter(|n| n.kind() == RCASES_PAT)
+            .count(),
+        0,
+        "`intros` takes no patterns here:\n{}",
+        sexpr(&intro)
+    );
+    // And the bracketed block after `<;>` is reached.
+    assert_eq!(count(src, TACTIC_SEQ_BRACKETED), 1);
+}
+
+#[test]
+fn instance_introducing_let_and_have_need_no_name() {
+    let src = "theorem t (p : Prop) : True := by\n  letI := Classical.propDecidable p\n  haveI := Classical.dec p\n  trivial\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, TACTIC_HAVE), 2, "{}", sexpr(&parse.syntax()));
+}
+
+#[test]
+fn an_unrecognised_command_may_carry_attributes() {
+    // mathlib deprecates aliases this way, with the attribute on its own line.
+    let src =
+        "@[deprecated (since := \"2026-01-01\")]\nalias oldName := newName\n\ndef after := 0\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, UNKNOWN_CMD), 1);
+    let file = SourceFile::cast(parse.syntax()).unwrap();
+    let names: Vec<String> = file
+        .declarations()
+        .filter_map(|d| d.name().map(|n| n.text().to_string()))
+        .collect();
+    assert_eq!(names, ["after"], "the following def must still be reached");
+}
+
+#[test]
+fn spacing_separates_an_ellipsis_argument_from_a_range() {
+    // `f (g ..)` leaves the rest to inference; `a..b` is a range.
+    assert_eq!(count("def d := f (g ..)\n", HOLE), 1);
+    let ranged = parse_clean("def d := ∫ x in a..b, f x\n");
+    assert_eq!(
+        ranged
+            .syntax()
+            .descendants()
+            .filter(|n| n.kind() == HOLE)
+            .count(),
+        0,
+        "`a..b` is a range, not an ellipsis"
+    );
+}
+
+#[test]
+fn an_import_list_stops_at_the_end_of_its_line() {
+    // `import A.B` followed by an ident-led command was absorbing the command's
+    // name as another module, because the module list was an unguarded
+    // `repeated()`. Same class of bug as an application eating the next line.
+    let src = "module\n\npublic import A.B\n\ndeprecated_module (since := \"2026-01-01\")\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, IMPORT), 1);
+    assert_eq!(count(src, UNKNOWN_CMD), 1);
+    let import = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == IMPORT)
+        .unwrap();
+    assert_eq!(
+        import
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|t| t.kind() == IDENT)
+            .count(),
+        1,
+        "only `A.B` is a module name:\n{}",
+        sexpr(&import)
+    );
+}
+
+#[test]
+fn instance_introducing_binders_work_in_term_position_too() {
+    // `haveI` and `letI` are identifiers rather than keywords, so they need
+    // their own path into the `have` shape.
+    parse_clean(
+        "def n : Nat :=\n  haveI : Inhabited Nat := inferInstanceAs (Inhabited Nat)\n  0\n",
+    );
+    parse_clean("def n : Nat :=\n  letI := Classical.propDecidable True\n  0\n");
+}
+
+#[test]
+fn an_operator_may_stand_alone_in_parentheses() {
+    // `((↑) : Rˣ → R)` passes the coercion itself as a function.
+    parse_clean("def n := ((↑) : Nat → Int)\n");
+    parse_clean("def n := (·) \n");
+}
+
+#[test]
+fn field_abbreviation_does_not_swallow_set_literals() {
+    // `{ cmd := c, args, env }` abbreviates two fields...
+    assert_eq!(
+        count("def n := { cmd := c, args, env }\n", STRUCT_INST_FIELD),
+        3
+    );
+    // ...but `{a, b}` stays a set literal, since the forms are ambiguous in
+    // surface syntax and Lean separates them by expected type.
+    assert_eq!(count("def n : Set Nat := {a, b}\n", SET_LIT), 1);
+    assert_eq!(count("def n : Set Nat := {a, b}\n", STRUCT_INST), 0);
+}
+
+#[test]
+fn a_modifier_decorates_an_ascii_operator() {
+    // `~ᵤ` is `Associated`, `=ᵐ` is almost-everywhere equality.
+    parse_clean("def n (x z : Nat) := x ~ᵤ z\n");
+    // Plain arithmetic is unaffected.
+    assert_eq!(count("def n := a + b\n", INFIX_TERM), 1);
+}

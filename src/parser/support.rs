@@ -256,6 +256,36 @@ where
         })
 }
 
+/// Matches a token of the given kind only when whitespace *does* separate it
+/// from the preceding token.
+///
+/// The complement of [`adjacent_tok`]. `(f ..)` passes `..` as an argument
+/// meaning "fill in the rest", while `a..b` is a range: spacing is what tells
+/// them apart.
+pub fn spaced_tok<'a>(kind: SyntaxKind) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let here = inp.cursor();
+        let idx = *here.inner();
+        let all = inp.full_slice();
+        let spaced = match (idx.checked_sub(1).and_then(|i| all.get(i)), all.get(idx)) {
+            (Some(prev), Some(cur)) => {
+                cur.kind == kind && prev.offset + prev.text.len() as u32 != cur.offset
+            }
+            (None, Some(cur)) => cur.kind == kind,
+            _ => false,
+        };
+        if spaced {
+            inp.skip();
+            Ok(Frag::Token(idx))
+        } else {
+            Err(Rich::custom(
+                inp.span_since(&here),
+                format!("expected {kind:?} preceded by whitespace"),
+            ))
+        }
+    })
+}
+
 /// True if this token opens a bracketed group, returning its closer.
 pub fn closer_for(kind: SyntaxKind) -> Option<SyntaxKind> {
     use SyntaxKind::*;
