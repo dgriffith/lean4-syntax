@@ -142,6 +142,9 @@ example :=
   let : Algebra B S := f.toAlgebra
   foo
 
+/-- A where clause may introduce no fields at all. -/
+instance : (forget A B).Braided where
+
 /-- Unique existence, and the monoidal unitor. -/
 example := ∃! p, CharP R p
 example := (λ_ M).hom

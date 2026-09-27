@@ -431,6 +431,7 @@ kinds! {
         MUTUAL_BLOCK,
         HASH_CMD,
         UNKNOWN_CMD,
+        DOCUMENTED_CMD,
         // Declarations.
         DECL_MODIFIERS,
         ATTR_LIST,
