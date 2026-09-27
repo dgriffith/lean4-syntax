@@ -259,17 +259,26 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 79.2% |
+| Files parsing with no errors | 80.6% |
 | Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 79.2% as the gaps below
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 80.6% as the gaps below
 were closed.
 Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
 that rate, are now down to 0.5%.
+
+One shape of bug accounted for five of them, and is now documented at
+`col_gt`: an unguarded `repeated()` over tokens that could begin a new line.
+An application absorbing the next line, `intros` claiming the next tactic as a
+pattern, an import list swallowing the next command's name, a `have` eating its
+own body, `at hA` taking the following `rw` as another hypothesis. The symptom is
+always the same — the construct parses in isolation and fails in place — which
+is also why reducing a failing file to a snippet repeatedly destroyed the
+evidence.
 
 Finding the gaps needed the report to separate causes from symptoms, which it
 does three ways: it ranks by the position the parser *failed* at rather than
