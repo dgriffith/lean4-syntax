@@ -153,12 +153,12 @@ const COMBINATOR_LIKE: &[&str] = &[
 
 /// Tokens that end a tactic's argument run at bracket depth zero.
 ///
-/// A comma is deliberately *not* here, even though it should be: in
-/// `refine ⟨by simp, by simp⟩` the inner `by` block ought to end at the comma
-/// and instead runs on. Adding `COMMA` fixes that nesting but costs 2.6% of the
-/// mathlib clean-parse rate through failures that do not reproduce in
-/// isolation, so it needs its own investigation rather than riding along with
-/// unrelated work.
+/// A comma is not here, because whether it ends a tactic depends on where the
+/// tactic is. In `refine ⟨by simp, by ring⟩` the first `by` block must end at
+/// the comma; in `use 1, 2` the comma separates arguments of one tactic. Adding
+/// `COMMA` unconditionally gets the first case right and the second wrong, which
+/// cost 2.6% of the mathlib clean rate when it was tried. The distinction is
+/// carried by [`Ctx::comma_stops`] and applied by [`tactic_arg_run`] instead.
 fn ends_tactic(kind: SyntaxKind) -> bool {
     matches!(kind, SEMICOLON | SEQ_FOCUS)
 }
@@ -305,7 +305,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // Trailing syntax a shape does not model. Present only when non-empty, so
     // a fully-understood tactic has no stray node, and an unmodelled tail is
     // visible rather than silently reattached to the following tactic.
-    let trailing = balanced_run(TACTIC_ARGS, ends_tactic, false).or_not();
+    let trailing = tactic_arg_run(TACTIC_ARGS, ends_tactic, false).or_not();
 
     // `[a, ← b, -c, *]`
     let simp_arg = node(
@@ -532,7 +532,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         TACTIC,
         group((
             tactic_head(),
-            balanced_run(TACTIC_ARGS, ends_tactic, false).or_not(),
+            tactic_arg_run(TACTIC_ARGS, ends_tactic, false).or_not(),
             layout_block(MATCH_ALTS, generic_alt, &[], false).or_not(),
         )),
     );
