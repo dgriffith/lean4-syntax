@@ -235,10 +235,12 @@ known precedence from an assumed one, rather than silently trusting a guess.
   abbreviated fields. The two are ambiguous in surface syntax and Lean separates
   them by expected type, which a parser does not have. A brace form with at
   least one `x := e` field does support abbreviation.
-- **Big terms are not bare application arguments.** Lean restricts arguments to
-  maximal precedence, and this parser follows it, with a trailing lambda as the
-  one exception (`xs.map fun x => x + 1` works). So `f do …` needs
-  `f <| do …` — which is what keeps `for x in xs do …` parsing correctly.
+- **Big terms are not bare application arguments**, Lean restricting arguments
+  to maximal precedence. The exceptions are a trailing lambda and a trailing
+  `do` block, both of which Lean allows: `xs.map fun x => x + 1` and
+  `withScope do …`. The `do` form needs the parser context to carry whether one
+  is permitted, since `for x in xs do …` is not an application of `xs` to a
+  `do` block.
 - **`a != b` needs spaces.** `!` and `?` are identifier characters in Lean, so
   `a!=b` lexes as `a!`, `=`, `b`. This matches Lean.
 - **`only`, `using` and `generalizing` are reserved.** Lean keeps one *global*

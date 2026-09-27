@@ -17,7 +17,7 @@ use crate::syntax::{
 };
 use chumsky::input::InputRef;
 use chumsky::prelude::*;
-use support::{Extra, In, Rec};
+use support::{Ctx, Extra, In, Rec};
 
 /// The mutually recursive parsers. Handles are `Rc`-backed, so they can be
 /// cloned into the rules that reference them and defined afterwards.
@@ -66,7 +66,7 @@ fn file<'a>(g: &Grammar<'a>) -> impl Parser<'a, In<'a>, Vec<Frag>, Extra<'a>> + 
             let before = *inp.cursor().inner();
             let checkpoint = inp.save();
 
-            match inp.parse(command.clone().with_ctx(base)) {
+            match inp.parse(command.clone().with_ctx(Ctx::default().at(base))) {
                 // A successful parse that consumed nothing would loop forever;
                 // treat it as a failure so recovery makes progress.
                 Ok(frag) if *inp.cursor().inner() > before => out.push(frag),

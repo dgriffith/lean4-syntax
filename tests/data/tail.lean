@@ -148,6 +148,12 @@ instance module : Module R X := inferInstanceAs (Module R X)
 /-- Matrix literals, whose rows are separated by `;`. -/
 example := !![1, 0; 0, -1].toLin !₂[x, y]
 
+/-- A trailing `do` block as an application argument, with a loop inside it. -/
+example : IO Unit := do
+  withSavedScopeOverride do
+    for i in [0:10] do
+      pure ()
+
 /-- A scalar action arrow. -/
 example := a •> b
 

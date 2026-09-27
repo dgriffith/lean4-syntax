@@ -22,9 +22,40 @@ use chumsky::recursive::Indirect;
 /// The parser input: significant tokens only.
 pub type In<'a> = &'a [SigToken<'a>];
 
-/// Error type, unit state, and a `u32` context holding the indentation
-/// threshold for the enclosing block.
-pub type Extra<'a> = extra::Full<Rich<'a, SigToken<'a>>, (), u32>;
+/// Error type, unit state, and a [`Ctx`] carrying what the parser needs to know
+/// about where it is.
+pub type Extra<'a> = extra::Full<Rich<'a, SigToken<'a>>, (), Ctx>;
+
+/// What the parser needs to know about its position, threaded through chumsky's
+/// context parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ctx {
+    /// The indentation threshold: a continuation token must be indented past
+    /// this column. Lean's `colGt`.
+    pub col: u32,
+    /// Whether a trailing `do` block may be an application argument.
+    ///
+    /// `f do …` is legal Lean, but `for x in xs do …` is not an application of
+    /// `xs` to a `do` block — so this is false while parsing a loop's
+    /// collection, and true elsewhere.
+    pub trailing_do: bool,
+}
+
+impl Default for Ctx {
+    fn default() -> Ctx {
+        Ctx {
+            col: 0,
+            trailing_do: true,
+        }
+    }
+}
+
+impl Ctx {
+    /// The same context at a new indentation threshold.
+    pub fn at(self, col: u32) -> Ctx {
+        Ctx { col, ..self }
+    }
+}
 
 /// A forward-declared parser, for the mutual recursion between terms, tactics
 /// and commands.
@@ -337,7 +368,7 @@ pub fn is_closer(kind: SyntaxKind) -> bool {
 /// continuation".
 pub fn col_gt<'a>() -> impl Parser<'a, In<'a>, (), Extra<'a>> + Clone {
     custom(|inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
-        let min = *inp.ctx();
+        let min = inp.ctx().col;
         let here = inp.cursor();
         match inp.peek() {
             Some(t) if t.col > min => Ok(()),
@@ -359,6 +390,53 @@ pub fn peek_col<'a>() -> impl Parser<'a, In<'a>, u32, Extra<'a>> + Clone {
                 inp.span_since(&here),
                 "unexpected end of input",
             )),
+        }
+    })
+}
+
+/// Reads the column of the next token and returns the context anchored there,
+/// for establishing a new layout position.
+pub fn peek_ctx<'a>() -> impl Parser<'a, In<'a>, Ctx, Extra<'a>> + Clone {
+    custom(|inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let here = inp.cursor();
+        match inp.peek() {
+            Some(t) => Ok(inp.ctx().at(t.col)),
+            None => Err(Rich::custom(
+                inp.span_since(&here),
+                "unexpected end of input",
+            )),
+        }
+    })
+}
+
+/// Runs `parser` with a trailing `do` argument disallowed.
+///
+/// Used for a loop's collection: in `for x in xs do …` the `do` opens the loop
+/// body, and reading it as an argument of `xs` makes the loop unparsable.
+pub fn without_trailing_do<'a, P, O>(parser: P) -> impl Parser<'a, In<'a>, O, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, O, Extra<'a>> + Clone + 'a,
+{
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let ctx = Ctx {
+            trailing_do: false,
+            ..*inp.ctx()
+        };
+        inp.parse(parser.clone().with_ctx(ctx))
+    })
+}
+
+/// Zero-width check that a trailing `do` argument is permitted here.
+pub fn trailing_do_allowed<'a>() -> impl Parser<'a, In<'a>, (), Extra<'a>> + Clone {
+    custom(|inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        if inp.ctx().trailing_do {
+            Ok(())
+        } else {
+            let here = inp.cursor();
+            Err(Rich::custom(
+                inp.span_since(&here),
+                "a trailing `do` cannot be an argument here",
+            ))
         }
     })
 }
@@ -400,7 +478,7 @@ fn run<'a>(
     stop_on_dedent: bool,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
-        let min = *inp.ctx();
+        let min = inp.ctx().col;
         let start = inp.cursor();
         let mut kids: Vec<Frag> = Vec::new();
         let mut depth: Vec<SyntaxKind> = Vec::new();
@@ -457,7 +535,7 @@ where
     P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
 {
     custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
-        let enclosing = *inp.ctx();
+        let enclosing = inp.ctx().col;
         let start = inp.cursor();
         let Some(first) = inp.peek() else {
             return Err(Rich::custom(
@@ -506,7 +584,8 @@ where
             let checkpoint = inp.save();
             // Each item's own column is the threshold for its contents, so the
             // next item can never be absorbed as a continuation of this one.
-            match inp.parse(item.clone().with_ctx(item_col)) {
+            let item_ctx = inp.ctx().at(item_col);
+            match inp.parse(item.clone().with_ctx(item_ctx)) {
                 Ok(frag) => kids.push(frag),
                 Err(err) => {
                     inp.rewind(checkpoint);
@@ -548,7 +627,7 @@ where
     P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
 {
     custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
-        let relaxed = inp.ctx().saturating_sub(1);
+        let relaxed = inp.ctx().at(inp.ctx().col.saturating_sub(1));
         inp.parse(parser.clone().with_ctx(relaxed))
     })
 }
@@ -559,5 +638,5 @@ pub fn with_position<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a
 where
     P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
 {
-    peek_col().then_with_ctx(parser).map(|(_, frag)| frag)
+    peek_ctx().then_with_ctx(parser).map(|(_, frag)| frag)
 }

@@ -717,3 +717,17 @@ fn a_scalar_action_arrow_is_one_token() {
     // And an ordinary comparison is unaffected.
     parse_clean("def d := ∀ x > 0, p x\n");
 }
+
+#[test]
+fn a_trailing_do_block_may_be_an_application_argument() {
+    // `withSavedScopeOverride do …` is an application whose argument is a `do`
+    // block. `for x in xs do …` is *not*, so the parser context now carries
+    // whether a trailing `do` is permitted, and a loop's collection turns it
+    // off. Both readings have to work, including nested.
+    parse_clean("def n : IO Unit := do\n  withSavedScopeOverride do\n    scopeOverride.set none\n");
+    parse_clean("def n : IO Unit := withFoo do pure ()\n");
+    parse_clean("def m : IO Unit := do\n  for i in [0:10] do\n    pure ()\n");
+    parse_clean("def m : IO Unit := do\n  while c do\n    pure ()\n");
+    parse_clean("def m : IO Unit := do\n  unless c do\n    pure ()\n");
+    parse_clean("def m : IO Unit := do\n  withFoo do\n    for i in xs do\n      pure ()\n");
+}
