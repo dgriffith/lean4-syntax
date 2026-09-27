@@ -182,8 +182,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     //   …
     // ```
     //
-    // Anchoring the value on its own first token still ends it at the next
-    // field, since that field is at a smaller column.
+    // `value_anchored` rather than `unanchored`: the threshold is the value's
+    // own column, not one below it, because the next field may sit at exactly
+    // that column.
     let where_field = node(
         STRUCT_INST_FIELD,
         group((
@@ -191,7 +192,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             binders_opt(g),
             type_spec(g).or_not(),
             tok(COLON_EQ),
-            unanchored(term.clone()),
+            value_anchored(term.clone()),
         )),
     );
 

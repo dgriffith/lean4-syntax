@@ -730,6 +730,38 @@ where
     })
 }
 
+/// Like [`unanchored`], for a *value* rather than a layout block: the threshold
+/// becomes the value's own first column, not one less.
+///
+/// A `where` field's value may begin to the left of its field name, and then
+/// that column is what bounds it. The distinction from [`unanchored`] is which
+/// side of the threshold the following tokens sit on. A `do` body is a layout
+/// block that applies `colGt` to its own first item, so its threshold has to be
+/// one *below* that item. A term applies `colGt` to its continuations, so its
+/// threshold has to be the value's column exactly — one less absorbs the next
+/// field:
+///
+/// ```lean
+///   algebraMap :=
+///   { toFun _ := PUnit.unit
+///     map_one' := rfl }
+///   commutes' _ _ := rfl
+/// ```
+///
+/// Here the value starts at column 2, the same column as its own field name. At
+/// a threshold of 1, `commutes'` reads as one more argument of the structure
+/// instance and its `:=` then fails — 98 files.
+pub fn value_anchored<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
+{
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let first = inp.peek().map(|t| t.col).unwrap_or(0);
+        let ctx = inp.ctx().at(inp.ctx().col.min(first));
+        inp.parse(parser.clone().with_ctx(ctx))
+    })
+}
+
 /// Runs `parser` with the indentation threshold set from the column of the next
 /// token, establishing a new layout position — Lean's `withPosition`.
 pub fn with_position<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone
