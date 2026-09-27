@@ -64,6 +64,51 @@ Two consequences worth knowing:
     exact ⟨hp, hq⟩   -- dedent: belongs to the outer block
   ```
 
+## The HIR
+
+`ast` gives typed views over the lossless CST, where every accessor returns
+`Option` (the tree must represent broken code) and children are borrowed (it must
+round-trip byte-for-byte). Both are right for editing and wrong for analysis.
+
+So `hir` is a second tree: a real ADT — `Term`, `Tactic`, `Item` — reached through
+`hir::lower`. The payoff is not the enum but that **lowering concentrates all the
+`Option` handling in one place**, so everything downstream sees total data.
+
+```rust
+let parse = lean4_syntax::parse(source);
+let module = lean4_syntax::hir::lower(&parse.syntax());
+
+for (_, item) in module.items() {
+    println!("{:?} {:?}", item.kind, item.name);
+}
+```
+
+**Arena, not `Box`.** Nodes live in arenas on `Module` and refer to each other by
+integer id. That follows from wanting analysis *and* rewriting at once: rewriting
+needs each node to link back to source, analysis needs structural equality, and a
+span stored *inside* a node makes derived equality positional and useless for
+comparison. With an arena the id is the identity, so source links live outside
+the nodes in a `SourceMap`. The cost is real — an id means nothing without its
+`Module`, so methods take `&Module` and there are no deep nested patterns.
+
+**Two kinds of equality**, and the obvious reading is the wrong one. Derived
+`PartialEq` is *shallow*: it compares a node's payload and its children's *ids*,
+which are arena positions. Two identical subterms in different places are **not**
+`==`. `Module::same_term` compares structure, resolving binders, patterns and
+tactics. So `==` is for caching keyed on identity; `same_term` answers whether
+two subterms are the same expression. An analysis using the wrong one would
+silently miss every repeated subterm.
+
+**One visitor.** `hir::visit` is the single place that knows each node's shape.
+Traversal, structural comparison and id remapping — which rewriting needs — are
+all derived from it, rather than each carrying its own forty-arm match.
+
+**Totality.** Lowering never panics and never drops syntax: anything unmodelled
+becomes `Opaque`, and anything that *should* have lowered is additionally
+recorded as a `LoweringError`. That separation is what makes coverage measurable:
+`Opaque` without an error is a deliberate boundary, `Opaque` with one is a gap.
+`examples/lower_report.rs` reports both.
+
 ## Scope
 
 Lean 4's grammar is user-extensible — `notation`, `infixl`, `macro_rules` and
@@ -224,8 +269,15 @@ pattern, `import A.B` swallowing the following command's name as a module. The
 rule they all needed is the one application arguments already had: a
 continuation must be indented past the position its construct was anchored at.
 
+Lowering to the HIR is measured the same way, by `examples/lower_report.rs`.
+Over the same corpus it produces **9.4M HIR nodes with zero panics**, and 0.7% of
+those nodes are `Opaque` — all of them at the two deliberate boundaries,
+uninterpreted tactics and syntax quotations. Zero `LoweringError`s, meaning
+nothing was recognised and then failed to lower.
+
 ```
 cargo run --release --example corpus_report -- path/to/mathlib4
+cargo run --release --example lower_report  -- path/to/mathlib4
 ```
 
 ## Usage

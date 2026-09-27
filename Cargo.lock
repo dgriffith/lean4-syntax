@@ -126,6 +126,7 @@ dependencies = [
  "chumsky",
  "expect-test",
  "rowan",
+ "stacker",
 ]
 
 [[package]]

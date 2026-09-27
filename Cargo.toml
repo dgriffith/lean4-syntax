@@ -12,6 +12,7 @@ repository = "https://github.com/dgriffith/lean4-syntax"
 [dependencies]
 chumsky = { version = "0.13.0", features = ["pratt"] }
 rowan = "0.17.0"
+stacker = "0.1.25"
 
 [dev-dependencies]
 expect-test = "1.5.1"

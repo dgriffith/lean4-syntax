@@ -27,6 +27,7 @@
 //! | Parse | [`parser`] | a tree of [`syntax::Frag`]s referencing tokens by index |
 //! | Materialize | [`syntax`] | a rowan green tree, trivia re-interleaved |
 //! | View | [`ast`] | typed wrappers over the untyped tree |
+//! | Lower | [`hir`] | an owned ADT for analysis and rewriting |
 //!
 //! Splitting parsing from tree construction is what makes losslessness
 //! structural rather than a matter of discipline: the parser works on
@@ -44,6 +45,14 @@
 //! structure of `do` and tactic blocks — and *records* grammar-extending
 //! commands without applying them. See the README for the specific
 //! consequences.
+//!
+//! # Which tree to use
+//!
+//! [`ast`] for anything that edits or formats source: it sits on the lossless
+//! tree, so it can round-trip and it tolerates syntax errors. [`hir`] for
+//! anything that analyses or transforms: it is owned, total, and comparable,
+//! with [`hir::Module::same_term`] for structural equality and
+//! [`hir::SourceMap`] linking every node back to the syntax it came from.
 
 pub mod ast;
 pub mod kind;
@@ -54,3 +63,4 @@ pub mod syntax;
 pub use kind::{Lean, SyntaxKind, SyntaxNode, SyntaxToken};
 pub use parser::parse;
 pub use syntax::{Parse, ParseError};
+pub mod hir;

@@ -1,7 +1,7 @@
 //! The token and node kinds that make up a Lean 4 syntax tree.
 //!
 //! Every kind lives in one flat `u16` enum because that is what rowan stores in
-//! its green nodes. The [`kinds!`] macro keeps the enum, the keyword table and
+//! its green nodes. The `kinds!` macro keeps the enum, the keyword table and
 //! the symbol table in sync: adding a keyword in one place is enough.
 
 /// Declares every [`SyntaxKind`] variant plus the lookup tables the lexer needs.
@@ -530,11 +530,9 @@ kinds! {
         CDOT_TERM,
         CALC_TERM,
         CALC_STEP,
-        NAME_TERM,
         NAMED_ARG,
         ANTIQUOTATION,
         QUOTED_TERM,
-        MACRO_CALL,
         ARG_LIST,
         // Do-notation elements.
         DO_SEQ,

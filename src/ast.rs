@@ -936,6 +936,7 @@ ast_enum!(
         Cdot(CdotTerm),
         Calc(CalcTerm),
         Quoted(QuotedTerm),
+        UnivArgs(UnivArgs),
     }
 );
 
