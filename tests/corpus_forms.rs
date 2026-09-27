@@ -687,3 +687,33 @@ fn a_location_clause_stops_at_the_end_of_its_line() {
     parse_clean("example : True := by\n  simp at *\n");
     parse_clean("example : True := by\n  induction n generalizing m k with\n  | zero => trivial\n");
 }
+
+#[test]
+fn module_is_a_soft_keyword() {
+    // Reserving `module` for the module system was a regression: it is an
+    // ordinary name everywhere except at the top of a file.
+    parse_clean("instance module : Module R X := inferInstanceAs (Module R X)\n");
+    parse_clean("module\n\npublic import A.B\n");
+}
+
+#[test]
+fn matrix_literals_separate_rows_with_semicolons() {
+    assert_eq!(count("def d := !![1, 0; 0, -1]\n", ARRAY_LIT), 1);
+    // `!₂` is one decorated symbol, and works in argument position.
+    assert_eq!(count("def d := f !₂[x, y]\n", ARRAY_LIT), 1);
+    parse_clean("lemma l : !![1, 0; 0, -1].toLin !₂[x, y] = !₂[x, -y] := foo\n");
+
+    // Matching on the text rather than on `SYMBOL` generally is what keeps the
+    // parameterised-operator reading intact — `M →ₗ[R] N` has the same shape.
+    assert_eq!(count("def d := M →ₗ[R] N\n", INFIX_TERM), 1);
+    assert_eq!(count("def d := M ⊗[R] N\n", INFIX_TERM), 1);
+}
+
+#[test]
+fn a_scalar_action_arrow_is_one_token() {
+    // `•>` — `>` joins the suffixes that decorate a non-ASCII operator.
+    // Three infix terms: `•>`, `•`, and the `=` joining them.
+    assert_eq!(count("example : a •> b = a • b := rfl\n", INFIX_TERM), 3);
+    // And an ordinary comparison is unaffected.
+    parse_clean("def d := ∀ x > 0, p x\n");
+}

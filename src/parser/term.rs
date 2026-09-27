@@ -419,12 +419,27 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
 
     // `![a, b, c]` — matrix and vector notation. Unambiguous, since a leading
     // `!` is not otherwise a term.
+    // `![a, b]` vectors and `!![a, b; c, d]` matrices, whose rows are separated
+    // by `;`. Unambiguous, since a leading `!` is not otherwise a term.
     let vec_lit = node(
         ARRAY_LIT,
         group((
-            tok(BANG),
+            // `!` and `!!`, and `!₂` which the lexer decorates into one symbol.
+            // Matching on the text rather than on `SYMBOL` generally matters:
+            // `M →ₗ[R] N` has the same shape, and treating that as a literal
+            // would destroy the parameterised-operator reading.
+            choice((
+                tok(BANG).repeated().at_least(1).collect::<Vec<_>>(),
+                tok_if_text(SYMBOL, |t| t.starts_with('!')).map(|t| vec![t]),
+            )),
             tok(L_BRACKET),
-            comma_terms.clone().or_not(),
+            term.clone()
+                .then(
+                    group((tok_in(&[COMMA, SEMICOLON]), term.clone()))
+                        .repeated()
+                        .collect::<Vec<_>>(),
+                )
+                .or_not(),
             tok(R_BRACKET),
         )),
     );

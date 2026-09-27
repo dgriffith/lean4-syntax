@@ -144,10 +144,16 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `foo.{u, v}`
+    // `module` is a soft keyword: the module-system command at the top of a
+    // file, and an ordinary name anywhere else — `instance module : Module R …`
+    // is real mathlib. Reserving it outright was a regression introduced with
+    // the module system.
+    let decl_name = tok_in(&[IDENT, KW_MODULE]);
+
     let decl_id = node(
         DECL_ID,
         group((
-            tok(IDENT),
+            decl_name.clone(),
             group((
                 adjacent_tok(DOT),
                 tok(L_BRACE),

@@ -603,7 +603,7 @@ impl<'a> Lexer<'a> {
                 // opens a lambda.
                 let decorates = |c: char| {
                     is_modifier(c)
-                        || (!text.is_ascii() && matches!(c, '+' | '*' | '\'' | '!' | '_'))
+                        || (!text.is_ascii() && matches!(c, '+' | '*' | '\'' | '!' | '_' | '>'))
                 };
                 if !kind.is_delimiter() && self.peek().is_some_and(decorates) {
                     self.bump_while(decorates);
