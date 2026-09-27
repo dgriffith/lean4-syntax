@@ -126,6 +126,9 @@ example := ‖x‖ + 1
 example := Foo.{u} ≫ Bar.{v}
 example := s!"{n}" ++ t
 
+/-- A lambda may destructure a pair. -/
+example := xs.map fun (a, b) => a + b
+
 /-- A structure instance may draw on several sources. -/
 example := { (f : A), (g f : B) with c := h f }
 

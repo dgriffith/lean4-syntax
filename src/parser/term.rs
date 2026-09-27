@@ -143,6 +143,13 @@ pub fn binder<'a>(g: &Grammar<'a>) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> +
                 tok(R_ANGLE_ANON),
             )),
         ),
+        // `fun (a, b) => a + b` destructures a pair. A parenthesised *binder*
+        // is tried first, so `(x : T)` is unaffected — it fails here only at the
+        // comma.
+        node(
+            TUPLE,
+            group((tok(L_PAREN), sep_list(term.clone(), COMMA), tok(R_PAREN))),
+        ),
         node(SIMPLE_BINDER, tok_in(&[IDENT, UNDERSCORE])),
     ))
 }
