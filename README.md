@@ -223,6 +223,10 @@ known precedence from an assumed one, rather than silently trusting a guess.
   `infixl` declarations are recorded but not applied, so an operator outside the
   curated table parses at a default precedence rather than its declared one.
   This is visible in the tree (see Notation) rather than silent.
+- **A file's own notation is still not applied**, which is now the binding
+  constraint rather than any individual missing form. `instance : Compl α where
+  compl a := a | a` needs the `infixl:70 " | "` declared earlier in that same
+  file; no amount of curated notation reaches it.
 - **Pattern alternation, `| a | b => e`, is not supported.** It is the one shape
   that genuinely collides with `|x|` for absolute value, which *is* supported:
   the alternation would have to be disambiguated from an absolute value opening
@@ -255,14 +259,14 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 71.5% |
+| Files parsing with no errors | 72.3% |
 | Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 71.5% as the gaps below
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% as the gaps below
 were closed.
 Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
 that rate, are now down to 0.5%.
