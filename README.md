@@ -313,7 +313,7 @@ rule they all needed is the one application arguments already had: a
 continuation must be indented past the position its construct was anchored at.
 
 Lowering to the HIR is measured the same way, by `examples/lower_report.rs`.
-Over the same corpus it produces **9.4M HIR nodes with zero panics**, and 0.7% of
+Over the same corpus it produces **10.1M HIR nodes with zero panics**, and 0.7% of
 those nodes are `Opaque` — all of them at the two deliberate boundaries,
 uninterpreted tactics and syntax quotations. Zero `LoweringError`s, meaning
 nothing was recognised and then failed to lower.
