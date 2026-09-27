@@ -357,6 +357,31 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )
     });
 
+    // `f (classifyUpload · · !overwrite)` — a negated argument. Like the
+    // coercion above, this has to be an atom of its own, because application
+    // arguments come from the atom set rather than the operator table.
+    //
+    // The operand must be *adjacent*, which is what keeps the postfix reading
+    // of `!` for mathlib's factorial: `n !` has a space and nothing to negate,
+    // and `n !⁻¹` has `⁻¹`, which is no operand either. Both fall through to
+    // the postfix entry in the operator table.
+    let negated = recursive(|negated| {
+        node(
+            PREFIX_TERM,
+            group((
+                tok(BANG),
+                choice((
+                    negated,
+                    node(REF, adjacent_tok(IDENT)),
+                    node(
+                        PAREN_TERM,
+                        group((adjacent_tok(L_PAREN), term.clone(), tok(R_PAREN))),
+                    ),
+                )),
+            )),
+        )
+    });
+
     // Curated constants, usable wherever a term is — including as an
     // application argument.
     let constant_term = node(
@@ -1004,6 +1029,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         hole,
         ellipsis,
         coerced,
+        negated,
         reference,
         constant_term,
     ))

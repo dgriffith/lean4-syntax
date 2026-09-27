@@ -270,3 +270,12 @@ example := { homEquiv (Y := Y) with map_add' _ _ := rfl : (X ⟶ Y) ≃+ (X →L
 /-- A field in a `with`-update may take its own arguments. -/
 example := { f with g _ _ := rfl }
 example := { f with g := 1 }
+
+/-- A negated argument. `!` is prefix when its operand is adjacent and postfix
+otherwise, which is how mathlib's factorial `n !` and Boolean `!b` coexist. -/
+example := f (classifyUpload · · !overwrite) (removeOnError := false)
+example := f y !x
+example := f !(a + b)
+example := (· · !x)
+example := n !
+example := n !⁻¹

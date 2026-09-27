@@ -273,6 +273,7 @@ pub fn visit_item(item: &mut Item, v: &mut dyn Visitor) {
         }
         opt_term(&mut field.ty, v);
         opt_term(&mut field.default, v);
+        visit_arms(&mut field.arms, v);
     }
 }
 

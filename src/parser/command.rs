@@ -185,16 +185,39 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // `value_anchored` rather than `unanchored`: the threshold is the value's
     // own column, not one below it, because the next field may sit at exactly
     // that column.
-    let where_field = node(
-        STRUCT_INST_FIELD,
-        group((
-            tok(IDENT),
-            binders_opt(g),
-            type_spec(g).or_not(),
-            tok(COLON_EQ),
-            value_anchored(term.clone()),
-        )),
-    );
+    let where_field = choice((
+        node(
+            STRUCT_INST_FIELD,
+            group((
+                tok(IDENT),
+                binders_opt(g),
+                type_spec(g).or_not(),
+                tok(COLON_EQ),
+                value_anchored(term.clone()),
+            )),
+        ),
+        // A field may be defined by equations rather than by a value, exactly
+        // as a `def` may:
+        //
+        // ```lean
+        // instance : Add N₃ where
+        //   add
+        //   | 0, x => x
+        //   | x, 0 => x
+        // ```
+        //
+        // The alternatives end at the next field, which does not start with a
+        // `|`, so several such fields can follow one another.
+        node(
+            STRUCT_INST_FIELD,
+            group((
+                tok(IDENT),
+                binders_opt(g),
+                type_spec(g).or_not(),
+                node(DECL_EQNS, match_alts(g)),
+            )),
+        ),
+    ));
 
     // The right-hand side of a declaration, in its three forms.
     let decl_body = choice((
