@@ -533,7 +533,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let struct_field = choice((
         node(
             STRUCT_INST_FIELD,
-            group((tok(IDENT), tok(COLON_EQ), term.clone())),
+            group((
+                tok(IDENT),
+                // `{ f with map_add' _ _ := rfl }` — a field may take its own
+                // arguments here just as it may in a `where` body.
+                binders_opt(g),
+                tok(COLON_EQ),
+                term.clone(),
+            )),
         ),
         // Field abbreviation: `{ x, y }` means `{ x := x, y := y }`.
         node(STRUCT_INST_FIELD, tok(IDENT)),
@@ -1019,7 +1026,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         tok_in(&[MODIFIER, INV]).map(|m| (POSTFIX_TERM, vec![m])),
         adjacent_tok(SYMBOL).map(|m| (POSTFIX_TERM, vec![m])),
         group((adjacent_tok(DOT), tok(NUMBER))).map(|(d, n)| (PROJ, vec![d, n])),
-        group((adjacent_tok(DOT), ident())).map(|(d, n)| (FIELD_ACCESS, vec![d, n])),
+        group((adjacent_tok(DOT), field_name())).map(|(d, n)| (FIELD_ACCESS, vec![d, n])),
         // Universe arguments: `Foo.{u, v}`.
         // Universe arguments: `Foo.{u, v}`, and also `Foo.{max u w}`, since a
         // level is an expression rather than only a name.
@@ -1035,7 +1042,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             kids.push(r);
             (UNIV_ARGS, kids)
         }),
-        group((tok(PIPE_RIGHT_DOT), tok_in(&[IDENT, NUMBER])))
+        group((tok(PIPE_RIGHT_DOT), choice((tok(NUMBER), field_name()))))
             .map(|(p, n)| (PIPE_PROJ, vec![p, n])),
         // `R⟦X⟧` — power series over `R`. The same delimiters appear as a
         // standalone quotient class, so adjacency is what marks this use.
