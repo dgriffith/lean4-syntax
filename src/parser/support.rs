@@ -166,6 +166,16 @@ pub fn ident_named<'a>(
         .map_with(|_, e: &mut MapExtra<'a, '_, In<'a>, Extra<'a>>| Frag::Token(e.span().start))
 }
 
+/// Matches a token of the given kind whose text also satisfies `pred`.
+pub fn tok_if_text<'a>(
+    kind: SyntaxKind,
+    pred: fn(&str) -> bool,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    any()
+        .filter(move |t: &SigToken<'a>| t.kind == kind && pred(t.text))
+        .map_with(|_, e: &mut MapExtra<'a, '_, In<'a>, Extra<'a>>| Frag::Token(e.span().start))
+}
+
 /// Matches any single token whose kind satisfies `pred`.
 pub fn any_tok_if<'a>(
     pred: fn(SyntaxKind) -> bool,

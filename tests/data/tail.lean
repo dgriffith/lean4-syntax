@@ -142,6 +142,15 @@ example :=
   let : Algebra B S := f.toAlgebra
   foo
 
+/-- `module` is a soft keyword: a command at the top of a file, a name elsewhere. -/
+instance module : Module R X := inferInstanceAs (Module R X)
+
+/-- Matrix literals, whose rows are separated by `;`. -/
+example := !![1, 0; 0, -1].toLin !₂[x, y]
+
+/-- A scalar action arrow. -/
+example := a •> b
+
 /-- A where clause may introduce no fields at all. -/
 instance : (forget A B).Braided where
 
