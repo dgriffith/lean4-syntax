@@ -278,6 +278,24 @@ non-space character as notation, and from 0.5% to zero by letting a string
 literal contain a newline — which Lean allows, and mathlib's expected-message
 tests rely on.
 
+Where the remaining failures are, measured per directory:
+
+| | files | clean |
+|---|---|---|
+| `Mathlib/` — mathematics proper | 8,569 | 87.5% |
+| `MathlibTest/` | 416 | 91.3% |
+| `Archive/` | 87 | 94.3% |
+| `Counterexamples/` | 31 | 93.5% |
+| `Cache/` — metaprogramming and IO | 19 | 42.1% |
+
+Mathematics proper sits at exactly the overall rate, so there is no "it is only
+the test files" to appeal to: what is left is spread through real mathematical
+content. `Cache/` is the outlier, and it is not mathematics at all — it is Lean
+metaprogramming with `StateT`, monad transformers and heavy `do` notation, which
+is why a disproportionate share of the gaps closed recently came from those 19
+files: the failable `let … | …`, the `do`-statement `match`, tuple patterns in a
+`let`, and `|||`.
+
 One shape of bug accounted for five of them, and is now documented at
 `col_gt`: an unguarded `repeated()` over tokens that could begin a new line.
 An application absorbing the next line, `intros` claiming the next tactic as a

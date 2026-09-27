@@ -604,13 +604,16 @@ impl<'a> Lexer<'a> {
     /// read Lean's token table, so a maximal run of operator characters is
     /// taken to be one token, which is what the table would have made it.
     ///
-    /// Two guards:
+    /// One guard: the run stops before `--` and `/-`, or it would swallow the
+    /// start of a comment. mathlib really does write `<--` and `|--`.
     ///
-    /// * The run stops before `--` and `/-`, or it would swallow the start of
-    ///   a comment. mathlib really does write `<--` and `|--`.
-    /// * A run may contain `|` but not begin with one, so that a match
-    ///   alternative's `|`, and `|x|` around a negation, still lex as `PIPE`.
-    ///   This gives up `|||` (18 uses) to keep `| -x => …` (structural).
+    /// A run may begin with `|`, which looks dangerous and is not. A match
+    /// alternative's `|` is followed by a space or by a non-operator character,
+    /// so its run is one character long and the token table wins; `||`, `|>` and
+    /// `|>.` are in the table at the same length or longer, so they win too.
+    /// Only a run of three or more starting with `|` behaves differently, which
+    /// is `|||` — and reading that as three pipes broke the `do` block around
+    /// `result := (result <<< 4) ||| digit.toUInt64`.
     ///
     /// Merging is safe for what the parser accepts even where it guesses
     /// wrong: a generic `SYMBOL` is infix at an assumed precedence, so `a *-b`
@@ -625,9 +628,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
             if n > 0 && (rest[i..].starts_with("--") || rest[i..].starts_with("/-")) {
-                break;
-            }
-            if c == '|' && n == 0 {
                 break;
             }
             n += 1;
