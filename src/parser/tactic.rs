@@ -428,7 +428,10 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `cases h with | inl a => tac`; `rcases h with ⟨x, hx⟩`;
-    let cases_target = group((group((tok(IDENT), tok(COLON))).or_not(), term.clone()));
+    let cases_target = group((
+        group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
+        term.clone(),
+    ));
 
     // `induction xs using List.rec with …`; `obtain ⟨a, b⟩ : T := e`
     let cases_tactic = node(
