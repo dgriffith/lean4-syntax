@@ -279,3 +279,22 @@ example := f !(a + b)
 example := (· · !x)
 example := n !
 example := n !⁻¹
+
+/-- Qq's pattern quotation `~q(…)`, in 89 mathlib files. The `~`, the name and
+the `(` must all be adjacent: a general "symbol adjacent to its operand is
+prefix" rule would turn `n+1` into an application of `n` to `+1`. -/
+example := ~q(f $a)
+meta def evalAlgebraMap : PositivityExt where eval {u β} _zβ pβ? e :=
+  match pβ? with | none => pure .none | some _ => do
+  let ~q(@algebraMap $α _ $instα $instβ $instαβ $a) := e | throwError "not `algebraMap`"
+  let some pα ← try? <| synthInstanceQ q(PartialOrder $α) | pure .none
+  match ← core q(inferInstance) (some pα) a with
+  | .positive pa =>
+    let _instαSemiring ← synthInstanceQ q(Semiring $α)
+    pure (.positive pa)
+  | _ => pure .none
+
+-- Operators written without spaces stay infix.
+example := n+1
+example := a ~ b
+example := f (n+1) (m*2)

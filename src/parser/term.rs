@@ -972,6 +972,26 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // `~q(f $a)` — Qq's pattern quotation, in 89 mathlib files. `q(…)` reads as
+    // an application of `q`, which keeps the structure inside the quotation
+    // (`$a` is a real antiquotation term), and `~` marks the whole thing as a
+    // pattern to match against rather than a term to build.
+    //
+    // Deliberately narrow: the `~`, the name and the `(` must all be adjacent.
+    // A general "symbol adjacent to its operand is prefix" rule would turn
+    // `n+1` into an application of `n` to `+1`.
+    let pattern_quotation = node(
+        PREFIX_TERM,
+        group((
+            tok(TILDE),
+            adjacent_tok(IDENT),
+            node(
+                PAREN_TERM,
+                group((adjacent_tok(L_PAREN), term.clone(), tok(R_PAREN))),
+            ),
+        )),
+    );
+
     // A syntax quotation `` `(…) ``; its contents are kept but not interpreted.
     let quoted = node(
         QUOTED_TERM,
@@ -1030,6 +1050,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ellipsis,
         coerced,
         negated,
+        pattern_quotation,
         reference,
         constant_term,
     ))
@@ -1292,6 +1313,17 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         // `let .app (.app _ a) b ← withReducible (whnf e) | …`
         group((tok(DOT), tok(IDENT), binders_opt(g)))
             .map(|(d, n, b)| Frag::Node(PATTERNS, vec![d, n, b])),
+        // `let ~q(@algebraMap $α _ $a) := e | throwError …` — Qq's pattern
+        // quotation as the thing being bound.
+        group((
+            tok(TILDE),
+            adjacent_tok(IDENT),
+            node(
+                PAREN_TERM,
+                group((adjacent_tok(L_PAREN), term.clone(), tok(R_PAREN))),
+            ),
+        ))
+        .map(|(t, n, p)| Frag::Node(PATTERNS, vec![t, n, p])),
     ));
 
     // A pattern-matching `let` in `do` may give the failure branch inline:
