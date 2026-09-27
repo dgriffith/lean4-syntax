@@ -438,6 +438,17 @@ pub enum Term {
     Subtype { binder: BinderId, predicate: TermId },
     /// `{ x | p x }`
     SetOf { binder: BinderId, predicate: TermId },
+    /// `xs[i]`, `xs[i]?`, `xs[i]!`, `xs[i]'h`, and `R⟦X⟧`.
+    ///
+    /// `open` distinguishes `[` from `⟦`, and `marker` carries the `?`, `!` or
+    /// `'` suffix where one was written.
+    Index {
+        receiver: TermId,
+        open: Name,
+        args: Vec<TermId>,
+        marker: Option<Name>,
+        proof: Option<TermId>,
+    },
     /// `e.1`
     Proj { receiver: TermId, index: u32 },
     /// `e.field` and `e |>.field`

@@ -328,7 +328,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let simp_tactic = node(
         TACTIC_SIMP,
         group((
-            tactic_name(SIMP_LIKE),
+            ident_named(SIMP_LIKE),
             config().or_not(),
             tok(KW_ONLY).or_not(),
             simp_args.clone().or_not(),
@@ -348,7 +348,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let rw_tactic = node(
         TACTIC_REWRITE,
         group((
-            tactic_name(REWRITE_LIKE),
+            ident_named(REWRITE_LIKE),
             config().or_not(),
             // `nth_rw 2 [foo]` selects which occurrence to rewrite.
             tok(NUMBER).or_not(),
@@ -369,7 +369,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let term_tactic = node(
         TACTIC_TERM,
         group((
-            tactic_name(TERM_LIKE),
+            ident_named(TERM_LIKE),
             config().or_not(),
             term.clone(),
             group((tok(KW_WITH), term.clone())).or_not(),
@@ -383,7 +383,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let term_list_tactic = node(
         TACTIC_TERM_LIST,
         group((
-            choice((tactic_name(TERM_LIST_LIKE), tok(KW_EXISTS_KW))),
+            choice((ident_named(TERM_LIST_LIKE), tok(KW_EXISTS_KW))),
             sep_list(term.clone(), COMMA),
             trailing.clone(),
         )),
@@ -403,7 +403,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let intro_tactic = node(
         TACTIC_INTRO,
         group((
-            tactic_name(INTRO_LIKE),
+            ident_named(INTRO_LIKE),
             col_gt()
                 .ignore_then(rcases_pat(g))
                 .repeated()
@@ -417,7 +417,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let cases_tactic = node(
         TACTIC_CASES,
         group((
-            tactic_name(CASES_LIKE),
+            ident_named(CASES_LIKE),
             config().or_not(),
             node(TACTIC_TARGETS, sep_list(term.clone(), COMMA)).or_not(),
             group((tok(KW_USING), term.clone()))
@@ -445,7 +445,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((
             choice((
                 tok_in(&[KW_HAVE, KW_SUFFICES, KW_LET]),
-                tactic_name(HAVE_LIKE),
+                ident_named(HAVE_LIKE),
             )),
             rcases_pat(g).or_not(),
             col_gt().ignore_then(binders(g)).or_not(),
@@ -465,7 +465,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let case_tactic = node(
         TACTIC_CASE,
         group((
-            tactic_name(CASE_LIKE),
+            ident_named(CASE_LIKE),
             node(
                 CASE_ARGS,
                 col_gt()
@@ -482,7 +482,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let conv_tactic = node(
         TACTIC_CONV,
         group((
-            tactic_name(CONV_LIKE),
+            ident_named(CONV_LIKE),
             location().or_not(),
             group((tok(KW_IN), term.clone())).or_not(),
             tok(FAT_ARROW),
@@ -504,7 +504,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let combinator_tactic = node(
         TACTIC_COMBINATOR_APP,
         group((
-            choice((tactic_name(COMBINATOR_LIKE), tok_in(&[KW_TRY, KW_REPEAT]))),
+            choice((ident_named(COMBINATOR_LIKE), tok_in(&[KW_TRY, KW_REPEAT]))),
             tok(NUMBER).or_not(),
             seq.clone(),
         )),

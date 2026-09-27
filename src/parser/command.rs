@@ -346,6 +346,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(DOC_COMMENT).or_not(),
             tok(PIPE),
             tok(DOC_COMMENT).or_not(),
+            tok_in(&[KW_PRIVATE, KW_PROTECTED, KW_PUBLIC])
+                .repeated()
+                .collect::<Vec<_>>(),
             tok(IDENT),
             binders_opt(g),
             type_spec(g).or_not(),

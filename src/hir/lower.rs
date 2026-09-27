@@ -276,6 +276,38 @@ impl Ctx {
             },
             STRUCT_INST => return self.struct_inst(node),
             SUBTYPE | SET_OF => return self.set_like(node),
+            INDEX => {
+                let open = Name(
+                    ast::token(node, L_BRACKET)
+                        .or_else(|| ast::token(node, L_DOUBLE_BRACKET))
+                        .map(|t| t.text().to_string())
+                        .unwrap_or_default(),
+                );
+                let marker = node
+                    .children_with_tokens()
+                    .filter_map(|it| it.into_token())
+                    .find(|t| matches!(t.kind(), QUESTION | BANG | TICK))
+                    .map(|t| Name(t.text().to_string()));
+                // `xs[i]'h` puts the in-bounds proof after the tick, so it is
+                // the one term child that is not an index.
+                let proof_node = term_after(node, TICK);
+                let mut children = kids.into_iter();
+                let receiver = self.term_or_gap(children.next(), node, "indexed term");
+                let args = children
+                    .filter(|c| proof_node.as_ref() != Some(c))
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|c| self.term(&c))
+                    .collect();
+                let proof = proof_node.map(|p| self.term(&p));
+                Term::Index {
+                    receiver,
+                    open,
+                    args,
+                    marker,
+                    proof,
+                }
+            }
             PROJ => {
                 let receiver = self.term_or_gap(kids.first().cloned(), node, "projection target");
                 let index = tok_text(node, NUMBER)
