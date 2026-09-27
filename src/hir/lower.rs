@@ -1336,11 +1336,24 @@ impl Ctx {
     }
 
     fn fields_in(&mut self, node: &SyntaxNode) -> Vec<FieldDecl> {
-        let list = match child_of(node, STRUCT_FIELD_LIST) {
+        // A `structure` or `class` carries the list directly; an `instance …
+        // where` carries it inside `DECL_BODY`. Only these two places are
+        // looked at, rather than all descendants, so a structure instance
+        // appearing *inside* a field's value is not mistaken for the list.
+        let list = match child_of(node, STRUCT_FIELD_LIST)
+            .or_else(|| child_of(node, DECL_BODY).and_then(|b| child_of(&b, STRUCT_FIELD_LIST)))
+        {
             Some(l) => l,
             None => return Vec::new(),
         };
-        children_of(&list, STRUCT_FIELD)
+        // Both kinds: a `structure`/`class` body declares `STRUCT_FIELD`s, an
+        // `instance … where` body defines `STRUCT_INST_FIELD`s. Reading only the
+        // first left every instance body absent from the HIR — `fields` empty
+        // and `value` none, with nothing opaque to reveal the loss, which for
+        // an instance means its proofs were invisible.
+        list.children()
+            .filter(|n| matches!(n.kind(), STRUCT_FIELD | STRUCT_INST_FIELD))
+            .collect::<Vec<_>>()
             .into_iter()
             .map(|field| {
                 let name = field
@@ -1356,11 +1369,15 @@ impl Ctx {
                     .and_then(|s| term_children(&s).first().cloned())
                     .map(|t| self.term(&t));
                 let default = term_after(&inner, COLON_EQ).map(|d| self.term(&d));
+                let arms = child_of(&field, DECL_EQNS)
+                    .map(|e| self.arms_in(&e))
+                    .unwrap_or_default();
                 FieldDecl {
                     name: Name(name),
                     binders: self.binders_in(&inner),
                     ty,
                     default,
+                    arms,
                     doc: tok_text(&field, DOC_COMMENT),
                 }
             })

@@ -717,8 +717,12 @@ pub struct FieldDecl {
     pub binders: Vec<BinderId>,
     /// Its type, if written.
     pub ty: Option<TermId>,
-    /// Its default value, if written.
+    /// The term after `:=`. For a structure field that is its default; for a
+    /// field of an `instance … where` body it is the definition itself.
     pub default: Option<TermId>,
+    /// The alternatives, for a field defined by equations rather than a value:
+    /// `add | 0, x => x | x, 0 => x`.
+    pub arms: Vec<Arm>,
     /// Its docstring, if present.
     pub doc: Option<String>,
 }

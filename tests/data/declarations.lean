@@ -86,3 +86,24 @@ class inductive Reachable (α : Type) : Prop where
   /-- The starting position. -/
   | base : Reachable α
   | step : Reachable α → Reachable α
+
+/-- A `where` field may be defined by equations rather than by a value, exactly
+as a `def` may, and several such fields can follow one another. -/
+instance : Add N₃ where
+  add
+  | 0, x => x
+  | x, 0 => x
+  | 1, 1 => two
+  | _, _ => more
+
+protected def map : h.cochainComplex ⟶ h'.cochainComplex where
+  f
+  | .ofNat n => fL.f n
+  | .negSucc n => fK.f n
+  comm'
+  | .ofNat i, _, .refl _ => fL.comm _ _
+  | .negSucc i, _, .refl _ => fK.comm _ _
+
+instance : Foo where
+  a := 1
+  b := 2

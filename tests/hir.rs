@@ -537,3 +537,44 @@ fn nested_items_are_all_reachable() {
     assert_eq!(var.nested.len(), 1);
     assert_eq!(module[var.nested[0]].kind, ItemKind::Abbrev);
 }
+
+/// An `instance … where` body must reach the HIR. It used to be absent
+/// entirely — `fields` empty and `value` none — with nothing opaque to reveal
+/// the loss, which for an instance means its proofs were invisible.
+#[test]
+fn an_instance_body_reaches_the_hir() {
+    let src = "\
+instance : Add N where
+  add := foo
+  zero := bar
+
+instance : Mul N where
+  mul
+  | 0, x => x
+  | x, 0 => x
+";
+    let parse = lean4_syntax::parse(src);
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let module = lean4_syntax::hir::lower(&parse.syntax());
+
+    let items: Vec<_> = module.items().collect();
+    let add = &items[0].1;
+    assert_eq!(
+        add.fields.len(),
+        2,
+        "both fields of the first instance are lowered"
+    );
+    assert_eq!(add.fields[0].name.0, "add");
+    assert!(
+        add.fields[0].default.is_some(),
+        "a field's `:=` value is its definition"
+    );
+
+    let mul = &items[1].1;
+    assert_eq!(mul.fields.len(), 1);
+    assert_eq!(
+        mul.fields[0].arms.len(),
+        2,
+        "a field defined by equations keeps its alternatives"
+    );
+}
