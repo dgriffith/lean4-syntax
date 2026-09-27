@@ -285,9 +285,21 @@ fn with_clause<'a>(
             relax_indent(seq),
         )),
     );
-    group((
-        tok(KW_WITH),
-        choice((
+    // Two shapes share `with`: `induction`/`cases` take alternatives, and
+    // `rcases`/`obtain` take an rcases pattern. The optional tactic that runs in
+    // every branch belongs to the *alternatives* shape only — Lean puts it in
+    // `inductionAlts` — and keeping it there is what stops it from eating the
+    // first pattern of `rcases h with ⟨x, hx⟩ | ⟨y, hy⟩`, which
+    // `rcases_with_patterns_is_distinguished_from_alternatives` caught.
+    choice((
+        group((
+            tok(KW_WITH),
+            // Kept as raw tokens rather than parsed as a tactic: it stops at
+            // the first top-level `|` and at a dedent, which is all that is
+            // needed to find the alternatives. Parsing it as a tactic sequence
+            // would re-enter the very `Recursive` being defined here, which
+            // fails silently.
+            balanced_run(RAW_TOKENS, |k| k == PIPE, false).or_not(),
             // `value_anchored`, because the tactic that introduced the `with`
             // is often mid-line while its alternatives are back at the tactic
             // block's own column:
@@ -301,10 +313,16 @@ fn with_clause<'a>(
             // Here `induction` sits at column 12 and the alternatives at 2.
             // `colGe` against column 12 rejects them.
             value_anchored(layout_block(MATCH_ALTS, alt, &[], false)),
-            node(PATTERNS, sep_list(rcases_pat(g), COMMA)),
-        )),
+        ))
+        .map(|(kw, pre, alts)| {
+            let mut kids = vec![kw];
+            kids.extend(pre);
+            kids.push(alts);
+            Frag::Node(WITH_CLAUSE, kids)
+        }),
+        group((tok(KW_WITH), node(PATTERNS, sep_list(rcases_pat(g), COMMA))))
+            .map(|(kw, pats)| Frag::Node(WITH_CLAUSE, vec![kw, pats])),
     ))
-    .map(|(kw, body)| Frag::Node(WITH_CLAUSE, vec![kw, body]))
 }
 
 // ---- The grammar -----------------------------------------------------------
