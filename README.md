@@ -268,8 +268,11 @@ The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% → 83.7% → 83.9% → 84.7% → 84.8% → 85.0% → 85.2% → 85.7% → 86.5% → 86.8% → 87.2% → 87.4% → 87.5% → 87.6% → 87.7%
-as the gaps below were closed.
+The clean rate has moved 0.5% → 30.8% → 63.5% → 80.6% → 87.7% as the gaps below
+were closed, in around forty measured steps. Every change is measured against
+the whole corpus before it lands, because several that looked obviously right
+were not: one cost 5.4% and another 2.6%, and both were caught this way rather
+than by reasoning.
 
 Unclassifiable characters were the stated ceiling on that rate, and they are now
 gone: every character in 102 MB of Lean reaches the parser as something
@@ -295,6 +298,32 @@ metaprogramming with `StateT`, monad transformers and heavy `do` notation, which
 is why a disproportionate share of the gaps closed recently came from those 19
 files: the failable `let … | …`, the `do`-statement `match`, tuple patterns in a
 `let`, and `|||`.
+
+### The bug the coverage metric cannot see
+
+`Opaque` records what lowering *reached and declined*. It says nothing about
+what lowering never looked at, so a subtree that no code visits is invisible to
+the coverage number — 0.8% opaque, zero errors, and the content simply gone.
+
+Four bugs of this class have been found:
+
+| | what vanished |
+|---|---|
+| `mutual … end` | every declaration but the first |
+| `instance … where` | the entire body — 616,307 HIR nodes, and for an instance that means its proofs |
+| `def … where` | the helper declarations — 22,555 nodes |
+| `m@(_ + 1)` | the pattern, leaving the arm with an empty pattern list |
+
+The guard that catches them asserts a **count**, not the absence of errors:
+`tests/hir.rs::every_container_delivers_its_contents` checks that N constructors
+lower to N `Ctor`s, N fields to N `FieldDecl`s, and so on, for every container
+node. A test asserting "no lowering errors" passes through all four.
+
+The last one also gives the rule for new syntax: **a node kind is not done when
+it parses.** Adding `AS_PATTERN` to the parser without registering it in
+`ast::Term` silently emptied the pattern list of every arm that used one — the
+same way a missing `UNIV_ARGS` and `INDEX` once produced 4,507 spurious lowering
+errors. It is done when something asserts its contents reach the HIR.
 
 One shape of bug accounted for five of them, and is now documented at
 `col_gt`: an unguarded `repeated()` over tokens that could begin a new line.
