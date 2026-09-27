@@ -391,3 +391,145 @@ fn a_modifier_decorates_an_ascii_operator() {
     // Plain arithmetic is unaffected.
     assert_eq!(count("def n := a + b\n", INFIX_TERM), 1);
 }
+
+// ---- The parse tail (#17) --------------------------------------------------
+
+#[test]
+fn absolute_value_coexists_with_the_alternative_separator() {
+    // `|` is also the match-alternative separator, the `rcases` alternation and
+    // the `first | …` branch marker. It is safe here because those are matched
+    // by explicit `tok(PIPE)` rules rather than through the term parser, and
+    // because a wrong attempt dies at the missing closing `|`.
+    assert_eq!(count("def d := |x|\n", NOTATION_BRACKET), 1);
+    assert_eq!(count("def d := f |x| + g |y|\n", NOTATION_BRACKET), 2);
+
+    // All the structural uses still work.
+    parse_clean("def f : Nat → Nat\n  | 0 => 1\n  | k + 1 => k\n");
+    parse_clean("def s : Set Nat := {y | y > 0}\n");
+    parse_clean("example : True := by\n  rcases h with a | b\n  · trivial\n  · trivial\n");
+    parse_clean("example : True := by\n  first\n    | exact h\n    | trivial\n");
+    parse_clean("inductive T where\n  | leaf\n  | node (l : T)\n");
+}
+
+#[test]
+fn set_difference_and_factorial_are_operators() {
+    assert_eq!(count("def d := s \\ t\n", INFIX_TERM), 1);
+    // Factorial applies after a bracket and across whitespace; a `!` directly
+    // after an identifier is part of that identifier.
+    assert_eq!(count("def d := (n - 1)!\n", POSTFIX_TERM), 1);
+    assert_eq!(count("def d := n !\n", POSTFIX_TERM), 1);
+    // And `!b` is still boolean negation.
+    assert_eq!(count("def d := !b\n", PREFIX_TERM), 1);
+}
+
+#[test]
+fn a_coercion_may_be_an_application_argument() {
+    // The operator table handles `↑` at the head of a term; arguments come from
+    // the atom set, so it has to be an atom as well.
+    let src = "def d := P n ↑m ↑n\n";
+    assert_eq!(count(src, PREFIX_TERM), 2);
+    parse_clean("def d := ↑↑m\n");
+}
+
+#[test]
+fn a_number_after_a_projection_dot_is_an_index() {
+    // `x.2.2` reaches a nested field; lexing `2.2` as a float broke it.
+    let src = "def d := (f x).2.2\n";
+    assert_eq!(count(src, PROJ), 2);
+    // Floats are unaffected.
+    assert_eq!(count("def d := 1.5\n", LITERAL), 1);
+}
+
+#[test]
+fn indexing_is_told_from_a_list_argument_by_adjacency() {
+    assert_eq!(count("def d := xs[n]\n", INDEX), 1);
+    assert_eq!(count("def d := xs[n]?\n", INDEX), 1);
+    assert_eq!(count("def d := xs[n]!\n", INDEX), 1);
+    // With a space it is an argument, as in Lean.
+    assert_eq!(count("def d := f [a, b]\n", INDEX), 0);
+    assert_eq!(count("def d := f [a, b]\n", LIST_LIT), 1);
+}
+
+#[test]
+fn hash_commands_take_a_docstring_and_an_in_clause() {
+    // `#guard_msgs` checks output against the docstring above it.
+    let src = "/-- info: 12 -/\n#guard_msgs in\n#norm_num (12 : Nat)\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, HASH_CMD), 2, "{}", sexpr(&parse.syntax()));
+}
+
+#[test]
+fn an_attribute_body_may_continue_at_column_zero() {
+    // Inside brackets Lean imposes no column constraint, but the run that reads
+    // an attribute's body was applying one.
+    parse_clean("/-- doc -/\n@[to_additive\n/-- additive doc -/]\nlemma t (h : p) : p := h\n");
+}
+
+#[test]
+fn extends_may_follow_the_result_type() {
+    // mathlib writes both orders.
+    parse_clean("structure S (R : Type u) : Type u\n    extends Add R where\n  mem : Nat\n");
+    parse_clean("structure S extends T : Type where\n  mem : Nat\n");
+}
+
+#[test]
+fn a_notation_may_be_scoped_to_another_namespace() {
+    parse_clean("@[inherit_doc] scoped[Veroff] infixl:70 \" ⊚ \" => Veroff.f\n");
+    parse_clean("/-- doc -/\nscoped[Veroff] notation \"x\" => y\n");
+    parse_clean("local infixl:65 \" ⊕ \" => Sum\n");
+}
+
+#[test]
+fn postfix_notation_binds_tighter_than_application() {
+    // In `g ℕ ℤˣ ℤ` the `ˣ` belongs to `ℤ`, not to the whole application, so it
+    // has to be a trailer rather than only an operator-table entry.
+    let src = "def d := g n zˣ m\n";
+    let parse = parse_clean(src);
+    let app = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == APP)
+        .expect("an application");
+    assert_eq!(
+        app.children().filter(|n| n.kind() == POSTFIX_TERM).count(),
+        1,
+        "the postfix applies to one argument:\n{}",
+        sexpr(&app)
+    );
+    // Applied to a complete term it still works.
+    assert_eq!(count("def d := (a + b)ᶜ\n", POSTFIX_TERM), 1);
+    assert_eq!(count("def d := ‖x‖₊\n", POSTFIX_TERM), 1);
+}
+
+#[test]
+fn isomorphism_composition_is_its_own_operator() {
+    // `≪≫` is one token; lexing it as `≪` then `≫` left two operators adjacent.
+    assert_eq!(count("def d := e ≪≫ f\n", INFIX_TERM), 1);
+    assert_eq!(count("def d := m ≪ n\n", INFIX_TERM), 1);
+}
+
+#[test]
+fn a_bound_variable_may_carry_several_restrictions() {
+    // `∑ p ∈ s with pred, f p` — mathlib's filtered sum.
+    parse_clean("def d := ∑ p ∈ G with Easy p, f p\n");
+    parse_clean("def d := ∑ p ∈ G, f p\n");
+    parse_clean("def d := ∃ x > 0, p x\n");
+}
+
+#[test]
+fn a_bracketed_tactic_list_applies_one_per_goal() {
+    let src = "example : True := by\n  constructor <;> [skip; trivial]\n";
+    assert_eq!(count(src, TACTIC_SEQ_BRACKETED), 1);
+    // The same tactic to all goals still parses.
+    parse_clean("example : True := by\n  constructor <;> trivial\n");
+}
+
+#[test]
+fn an_interpolated_string_may_embed_a_string() {
+    // The embedded term is part of the literal, so a string inside it must not
+    // terminate the outer one.
+    parse_clean("def d := s!\"one of {\", \".intercalate names}\"\n");
+    parse_clean("def d := m!\"{e} : {t}\"\n");
+    // A brace in an ordinary string is just a brace.
+    parse_clean("def d := \"{\"\n");
+}

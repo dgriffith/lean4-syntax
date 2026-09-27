@@ -170,6 +170,28 @@ non-empty one is a visible signal of an unmodelled form.
 (`RCASES_PAT`, `RCASES_TUPLE`, `RCASES_ALT`), covering tuples, alternations,
 `-` to clear a hypothesis and `@` to expose implicit arguments.
 
+### `|` is the hard character
+
+`|` does four jobs in Lean: absolute value, the match-alternative separator, the
+`rcases` alternation, and the `first | …` branch marker. Absolute value is
+supported anyway, and it is worth knowing why that is safe rather than reckless.
+
+The separators are matched by explicit `tok(PIPE)` rules inside the grammar that
+needs them — `match` alternatives, constructor lists, `rcases` patterns — and
+never reach the term parser. And a wrong attempt fails cheaply, because the
+closing `|` is required: in
+
+```lean
+| a => f
+| b => g
+```
+
+reading `| b` as an absolute value dies at the `=>` where the closing `|` should
+be, so the application ends where it should. That is worth roughly 8% of the
+mathlib clean-parse rate on its own.
+
+The cost is pattern alternation, listed under limitations below.
+
 ### Notation
 
 Lean's grammar is user-extensible, and mathlib exercises that hard: 292 distinct
@@ -201,9 +223,10 @@ known precedence from an assumed one, rather than silently trusting a guess.
   `infixl` declarations are recorded but not applied, so an operator outside the
   curated table parses at a default precedence rather than its declared one.
   This is visible in the tree (see Notation) rather than silent.
-- **`|x|` is not supported.** Absolute value would collide with `|` as used by
-  match alternatives and `rcases` patterns — the leading cause of the remaining
-  failures, and not cheaply fixable.
+- **Pattern alternation, `| a | b => e`, is not supported.** It is the one shape
+  that genuinely collides with `|x|` for absolute value, which *is* supported:
+  the alternation would have to be disambiguated from an absolute value opening
+  where a pattern is expected.
 - **`{a, b}` is read as a set literal**, never as a structure instance with
   abbreviated fields. The two are ambiguous in surface syntax and Lean separates
   them by expected type, which a parser does not have. A brace form with at
@@ -232,15 +255,15 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 46.1% |
+| Files parsing with no errors | 63.5% |
 | Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% as the gaps below were
-closed.
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% as the gaps below
+were closed.
 Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
 that rate, are now down to 0.5%.
 

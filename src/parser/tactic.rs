@@ -574,11 +574,18 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     ))
     .boxed();
 
+    // `tac <;> [t₁; t₂]` applies one tactic per goal the left produced, rather
+    // than the same tactic to all of them.
+    let per_goal = node(
+        TACTIC_SEQ_BRACKETED,
+        group((tok(L_BRACKET), seq.clone(), tok(R_BRACKET))),
+    );
+
     // `tac <;> tac` applies the right tactic to every goal the left produced.
     let item = base
         .clone()
         .then(
-            group((tok(SEQ_FOCUS), base.clone()))
+            group((tok(SEQ_FOCUS), choice((per_goal, base.clone()))))
                 .repeated()
                 .collect::<Vec<_>>(),
         )

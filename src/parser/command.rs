@@ -107,12 +107,19 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(AT),
             tok(L_BRACKET),
             sep_list(
-                node(ATTR, balanced_run(RAW_TOKENS, stops_at_comma, false)),
+                node(ATTR, bracketed_run(RAW_TOKENS, stops_at_comma, false)),
                 COMMA,
             ),
             tok(R_BRACKET),
         )),
     );
+
+    // `local`, `scoped`, and `scoped[Namespace]`, which scopes a notation to a
+    // namespace other than the current one.
+    let scope_modifier = group((
+        tok_in(&[KW_LOCAL, KW_SCOPED]),
+        group((tok(L_BRACKET), tok(IDENT), tok(R_BRACKET))).or_not(),
+    ));
 
     let modifiers = node(
         DECL_MODIFIERS,
@@ -288,8 +295,11 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok_in(&[KW_STRUCTURE]),
             decl_id.clone(),
             binders_opt(g),
-            extends_clause.clone().or_not(),
-            type_spec(g).or_not(),
+            // `extends` may come before or after the result type; mathlib uses
+            // both orders.
+            choice((extends_clause.clone(), type_spec(g)))
+                .repeated()
+                .collect::<Vec<_>>(),
             group((
                 tok(KW_WHERE),
                 // The constructor may be named: `where mk ::`
@@ -310,8 +320,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(KW_INDUCTIVE).or_not(),
             decl_id.clone(),
             binders_opt(g),
-            extends_clause.or_not(),
-            type_spec(g).or_not(),
+            choice((extends_clause, type_spec(g)))
+                .repeated()
+                .collect::<Vec<_>>(),
             group((
                 tok(KW_WHERE),
                 group((tok(IDENT), tok(DOUBLE_COLON))).or_not(),
@@ -380,9 +391,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let open_cmd = node(
         OPEN_CMD,
         group((
-            tok_in(&[KW_LOCAL, KW_SCOPED])
-                .repeated()
-                .collect::<Vec<_>>(),
+            scope_modifier.clone().repeated().collect::<Vec<_>>(),
             tok(KW_OPEN),
             balanced_run(RAW_TOKENS, stops_at_in, false),
             group((tok(KW_IN), cmd.clone())).or_not(),
@@ -456,13 +465,11 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let attribute_cmd = node(
         ATTRIBUTE_CMD,
         group((
-            tok_in(&[KW_LOCAL, KW_SCOPED])
-                .repeated()
-                .collect::<Vec<_>>(),
+            scope_modifier.clone().repeated().collect::<Vec<_>>(),
             tok(KW_ATTRIBUTE),
             tok(L_BRACKET),
             sep_list(
-                node(ATTR, balanced_run(RAW_TOKENS, stops_at_comma, false)),
+                node(ATTR, bracketed_run(RAW_TOKENS, stops_at_comma, false)),
                 COMMA,
             ),
             tok(R_BRACKET),
@@ -475,12 +482,16 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `#check`, `#eval`, `#print`, …
+    // `/-- info: 12 * 5 -/` then `#guard_msgs in` — a `#` command takes a
+    // docstring, which is what `#guard_msgs` checks against.
     let hash_cmd = node(
         HASH_CMD,
         group((
+            modifiers.clone(),
             tok(HASH),
             tok(IDENT).or_not(),
             balanced_run(RAW_TOKENS, never, true),
+            group((tok(KW_IN), cmd.clone())).or_not(),
         )),
     );
 
@@ -492,9 +503,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let mixfix_cmd = node(
         MIXFIX_CMD,
         group((
-            tok_in(&[KW_LOCAL, KW_SCOPED])
-                .repeated()
-                .collect::<Vec<_>>(),
+            tok(DOC_COMMENT).or_not(),
+            attr_list.clone().or_not(),
+            scope_modifier.clone().repeated().collect::<Vec<_>>(),
             tok_in(&[KW_INFIX, KW_INFIXL, KW_INFIXR, KW_PREFIX, KW_POSTFIX]),
             precedence.clone().or_not(),
             attr_list.clone().or_not(),
@@ -505,9 +516,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let notation_cmd = node(
         NOTATION_CMD,
         group((
-            tok_in(&[KW_LOCAL, KW_SCOPED])
-                .repeated()
-                .collect::<Vec<_>>(),
+            tok(DOC_COMMENT).or_not(),
+            attr_list.clone().or_not(),
+            scope_modifier.clone().repeated().collect::<Vec<_>>(),
             tok(KW_NOTATION),
             precedence.or_not(),
             balanced_run(RAW_TOKENS, never, true),
@@ -520,9 +531,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         node(
             kind,
             group((
-                tok_in(&[KW_LOCAL, KW_SCOPED])
-                    .repeated()
-                    .collect::<Vec<_>>(),
+                tok(DOC_COMMENT).or_not(),
+                attr_list.clone().or_not(),
+                scope_modifier.clone().repeated().collect::<Vec<_>>(),
                 tok_in(kw),
                 balanced_run(RAW_TOKENS, never, true),
             )),
