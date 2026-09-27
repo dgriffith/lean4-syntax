@@ -443,7 +443,21 @@ fn universe_arguments_are_a_term() {
     let Term::Universes { levels, .. } = &module[rhs] else {
         panic!("expected universe arguments, got {:?}", module[rhs])
     };
-    assert_eq!(levels, &[Name::from("u")]);
+    assert_eq!(levels.len(), 1);
+    assert_eq!(module[levels[0]], Term::Ref(Name::from("u")));
+
+    // A level may be an expression, not only a name.
+    let (module, term) = value("AlgCat.{max u w} R");
+    let univ = module
+        .terms()
+        .map(|(_, t)| t)
+        .find(|t| matches!(t, Term::Universes { .. }))
+        .expect("universe arguments");
+    let Term::Universes { levels, .. } = univ else {
+        unreachable!()
+    };
+    assert!(matches!(module[levels[0]], Term::App { .. }));
+    let _ = term;
 }
 
 #[test]

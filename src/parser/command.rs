@@ -333,9 +333,17 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // The docstring comes *before* the `|`:
+    //
+    // ```lean
+    // inductive Reachable : (Fin 6 → ℕ) → Prop
+    //   /-- The starting position -/
+    //   | base : Reachable 1
+    // ```
     let ctor = node(
         CTOR,
         group((
+            tok(DOC_COMMENT).or_not(),
             tok(PIPE),
             tok(DOC_COMMENT).or_not(),
             tok(IDENT),

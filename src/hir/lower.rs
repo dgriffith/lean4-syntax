@@ -290,7 +290,8 @@ impl Ctx {
             }
             TYPE_ASCRIPTION => {
                 let term = self.term_or_gap(kids.first().cloned(), node, "ascribed term");
-                let ty = self.term_or_gap(kids.get(1).cloned(), node, "ascribed type");
+                // Absent in `(e :)`, which defers to the expected type.
+                let ty = self.opt_term(kids.get(1).cloned());
                 Term::Ascription { term, ty }
             }
             AT_TERM => {
@@ -306,14 +307,12 @@ impl Ctx {
                 Term::Explicit(inner)
             }
             UNIV_ARGS => {
-                let term = self.term_or_gap(kids.first().cloned(), node, "universe-annotated term");
-                Term::Universes {
-                    term,
-                    levels: toks(node, &[IDENT, NUMBER, UNDERSCORE])
-                        .into_iter()
-                        .map(Name)
-                        .collect(),
-                }
+                // The first term child is the receiver; the rest are levels,
+                // each of which may be an expression such as `max u w`.
+                let mut children = kids.into_iter();
+                let term = self.term_or_gap(children.next(), node, "universe-annotated term");
+                let levels = children.map(|level| self.term(&level)).collect();
+                Term::Universes { term, levels }
             }
             CALC_TERM => Term::Calc {
                 steps: self.calc_steps(node),
