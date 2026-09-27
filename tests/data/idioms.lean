@@ -298,3 +298,29 @@ meta def evalAlgebraMap : PositivityExt where eval {u β} _zβ pβ? e :=
 example := n+1
 example := a ~ b
 example := f (n+1) (m*2)
+
+/-- An operator run may begin with `|`. Every structural use of `|` is protected
+by the other two rules: a match alternative's `|` is followed by a space or a
+non-operator character so its run is one character and the token table wins, and
+`||`/`|>`/`|>.` are in the table at the same length or longer. -/
+example := a ||| b
+example := (a <<< 4) ||| b
+example := a || b
+example := x |>.foo
+example := x |> f
+example := |x|
+example := ‖-x‖
+example := match a with | 0 | 1 => x | _ => y
+def pipe_alternatives : Nat → Nat
+  | 0 => 1
+  | -1 => 2
+  | n + 1 => n
+
+/-- A `do` block whose reassignment uses those operators. -/
+def parseHexToUInt64? (s : String) : Option UInt64 := do
+  if s.length != 16 then failure
+  let mut result : UInt64 := 0
+  for c in s.toList do
+    let digit ← c.hexDigitToNat?
+    result := (result <<< 4) ||| digit.toUInt64
+  return result
