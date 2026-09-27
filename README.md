@@ -235,10 +235,12 @@ known precedence from an assumed one, rather than silently trusting a guess.
   abbreviated fields. The two are ambiguous in surface syntax and Lean separates
   them by expected type, which a parser does not have. A brace form with at
   least one `x := e` field does support abbreviation.
-- **Big terms are not bare application arguments.** Lean restricts arguments to
-  maximal precedence, and this parser follows it, with a trailing lambda as the
-  one exception (`xs.map fun x => x + 1` works). So `f do …` needs
-  `f <| do …` — which is what keeps `for x in xs do …` parsing correctly.
+- **Big terms are not bare application arguments**, Lean restricting arguments
+  to maximal precedence. The exceptions are a trailing lambda and a trailing
+  `do` block, both of which Lean allows: `xs.map fun x => x + 1` and
+  `withScope do …`. The `do` form needs the parser context to carry whether one
+  is permitted, since `for x in xs do …` is not an application of `xs` to a
+  `do` block.
 - **`a != b` needs spaces.** `!` and `?` are identifier characters in Lean, so
   `a!=b` lexes as `a!`, `=`, `b`. This matches Lean.
 - **`only`, `using` and `generalizing` are reserved.** Lean keeps one *global*
@@ -259,15 +261,15 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 80.6% |
+| Files parsing with no errors | 81.3% |
 | Files containing a character the lexer cannot classify | 0.5% |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 80.6% as the gaps below
-were closed.
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% as the
+gaps below were closed.
 Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
 that rate, are now down to 0.5%.
 

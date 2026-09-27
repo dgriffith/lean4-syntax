@@ -813,6 +813,8 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     ));
 
     let do_term = node(DO_TERM, group((tok(KW_DO), g.do_seq.clone())));
+    // Kept for use as a trailing application argument, below.
+    let trailing_do_arg = do_term.clone();
 
     // `calc a = b := pf` followed by `_ = c := pf` steps.
     let calc_step = node(
@@ -981,9 +983,21 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 .repeated()
                 .collect::<Vec<_>>(),
         )
-        // Lean's one concession to big terms in argument position: a trailing
-        // lambda, as in `xs.map fun x => x + 1`.
-        .then(col_gt().ignore_then(fun_term).or_not())
+        // Lean's concessions to big terms in argument position: a trailing
+        // lambda, as in `xs.map fun x => x + 1`, and a trailing `do` block, as
+        // in `withSavedScopeOverride do …`.
+        //
+        // The `do` form needs a guard, because `for x in xs do …` is not an
+        // application of `xs` to a `do` block. The context carries whether one
+        // is permitted, and a loop's collection is parsed with it off.
+        .then(
+            col_gt()
+                .ignore_then(choice((
+                    fun_term,
+                    trailing_do_allowed().ignore_then(trailing_do_arg),
+                )))
+                .or_not(),
+        )
         .map(|((head, mut args), trailing)| {
             args.extend(trailing);
             if args.is_empty() {
@@ -1164,7 +1178,7 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             group((
                 tok(KW_FOR),
                 sep_list(
-                    group((term.clone(), tok(KW_IN), term.clone()))
+                    group((term.clone(), tok(KW_IN), without_trailing_do(term.clone())))
                         .map(|(p, i, e)| Frag::Node(BINDERS, vec![p, i, e])),
                     COMMA,
                 ),
@@ -1174,7 +1188,12 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
         node(
             DO_WHILE,
-            group((tok(KW_WHILE), term.clone(), tok(KW_DO), g.do_seq.clone())),
+            group((
+                tok(KW_WHILE),
+                without_trailing_do(term.clone()),
+                tok(KW_DO),
+                g.do_seq.clone(),
+            )),
         ),
         node(DO_REPEAT, group((tok(KW_REPEAT), g.do_seq.clone()))),
         // In `do`, the `else` branch is optional.
@@ -1214,7 +1233,12 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
         node(
             DO_UNLESS,
-            group((tok(KW_UNLESS), term.clone(), tok(KW_DO), g.do_seq.clone())),
+            group((
+                tok(KW_UNLESS),
+                without_trailing_do(term.clone()),
+                tok(KW_DO),
+                g.do_seq.clone(),
+            )),
         ),
         node(DO_EXPR, term.clone()),
     ));

@@ -86,6 +86,15 @@ struct Example {
     snippet: String,
 }
 
+/// How many distinct examples to keep per failure signature.
+///
+/// A signature is only a token-kind pair, so one bucket can hold several
+/// unrelated causes: the `ERROR :: PIPE` bucket mixed a user-notation Sheffer
+/// stroke with `class inductive`'s constructor list. Showing one example per
+/// bucket made a 103-file bucket look like a single cause and sent two probes
+/// after the wrong one. Keep several, deduplicated by snippet.
+const EXAMPLES_PER_SIG: usize = 4;
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (flags, roots): (Vec<_>, Vec<_>) = args.iter().partition(|a| a.starts_with("--"));
@@ -132,7 +141,7 @@ fn main() {
     let mut unknown_chars: BTreeMap<String, usize> = BTreeMap::new();
     let mut files_with_unknown_chars = 0usize;
     let mut failures: BTreeMap<Signature, usize> = BTreeMap::new();
-    let mut failure_examples: BTreeMap<Signature, Example> = BTreeMap::new();
+    let mut failure_examples: BTreeMap<Signature, Vec<Example>> = BTreeMap::new();
 
     let start = Instant::now();
     for path in &files {
@@ -171,11 +180,14 @@ fn main() {
                 // up on and would swamp the ranking.
                 for (sig, offset, snippet) in file_failures.into_iter().take(1) {
                     *failures.entry(sig.clone()).or_default() += 1;
-                    failure_examples.entry(sig).or_insert_with(|| Example {
-                        file: path.clone(),
-                        line: lines.line_of(offset),
-                        snippet,
-                    });
+                    let seen = failure_examples.entry(sig).or_default();
+                    if seen.len() < EXAMPLES_PER_SIG && !seen.iter().any(|e| e.snippet == snippet) {
+                        seen.push(Example {
+                            file: path.clone(),
+                            line: lines.line_of(offset),
+                            snippet,
+                        });
+                    }
                 }
                 for (sig, offset, snippet) in errors {
                     *counts.entry(sig.clone()).or_default() += 1;
@@ -248,7 +260,7 @@ fn main() {
     println!("where the parser actually failed, which names the construct:");
     for (sig, n) in ranked_failures.iter().take(top) {
         println!("\n  {n:>6}  {sig}");
-        if let Some(ex) = failure_examples.get(*sig) {
+        for ex in failure_examples.get(*sig).into_iter().flatten() {
             println!("          {}:{}", ex.file.display(), ex.line);
             println!("          {}", ex.snippet);
         }
