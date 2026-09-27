@@ -213,3 +213,13 @@ instance punit_algebra : Algebra R PUnit.{v + 1} where
     map_mul' _ _ := rfl }
   commutes' _ _ := rfl
   smul_def' _ _ := rfl
+
+/-- A parenthesized binder may destructure instead of naming, with the type
+ascription applying to the pattern. -/
+example := (fun (⟨g, g'⟩ : presB.G × presM.R) ↦ presB.var g • Finsupp.single g' (1 : B))
+
+/-- A structure instance may name the structure being built, where the fields
+alone would leave it to be inferred. -/
+example := { f := 1 : T }
+example := { f := 1, g := · : T }
+example := ⟨({ toLinearMap := ofClass f, norm_map' := · : E →ₗᵢ[𝕜] E' }.inner_map_map), h⟩

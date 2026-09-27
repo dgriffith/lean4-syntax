@@ -82,6 +82,20 @@ pub fn bracket_binder<'a>(
         .at_least(1)
         .collect::<Vec<_>>();
 
+    // A binder may destructure instead of naming:
+    // `fun (⟨g, g'⟩ : presB.G × presM.R) ↦ …`. The pattern stands where the
+    // names would, so the type ascription that follows applies to it.
+    let anon_pattern = node(
+        ANON_CTOR,
+        group((
+            tok(L_ANGLE_ANON),
+            sep_list(term.clone(), COMMA).or_not(),
+            tok(R_ANGLE_ANON),
+        )),
+    )
+    .map(|f| vec![f]);
+    let bound = choice((anon_pattern, names.clone()));
+
     let default_value = node(
         DEFAULT_VALUE,
         group((tok_in(&[COLON_EQ, DOT_DOT]), term.clone().or_not())),
@@ -92,7 +106,7 @@ pub fn bracket_binder<'a>(
             PAREN_BINDER,
             group((
                 tok(L_PAREN),
-                names.clone(),
+                bound,
                 type_spec(g).or_not(),
                 default_value.or_not(),
                 tok(R_PAREN),
@@ -551,6 +565,10 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     false,
                 )
                 .or_not(),
+                // `{ toLinearMap := f, norm_map' := · : E →ₗᵢ[𝕜] E' }` names the
+                // structure being built, where the fields alone would leave it
+                // to be inferred.
+                type_spec(g).or_not(),
                 tok(R_BRACE),
             )),
         ),
@@ -576,6 +594,10 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     &[COMMA, SEMICOLON],
                     false,
                 ),
+                // `{ toLinearMap := f, norm_map' := · : E →ₗᵢ[𝕜] E' }` names the
+                // structure being built, where the fields alone would leave it
+                // to be inferred.
+                type_spec(g).or_not(),
                 tok(R_BRACE),
             )),
         ),
@@ -633,6 +655,10 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     &[COMMA, SEMICOLON],
                     false,
                 ),
+                // `{ toLinearMap := f, norm_map' := · : E →ₗᵢ[𝕜] E' }` names the
+                // structure being built, where the fields alone would leave it
+                // to be inferred.
+                type_spec(g).or_not(),
                 tok(R_BRACE),
             )),
         ),
