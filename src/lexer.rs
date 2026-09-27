@@ -598,8 +598,13 @@ impl<'a> Lexer<'a> {
                 // `=ᵐ` almost-everywhere equality. The ASCII suffixes `+ * '`
                 // decorate only a non-ASCII base, so `a + b` and `x * y` are
                 // untouched.
-                let decorates =
-                    |c: char| is_modifier(c) || (!text.is_ascii() && matches!(c, '+' | '*' | '\''));
+                // `∃!` is unique existence and `λ_` a monoidal unitor; both are
+                // single tokens, and `λ` cannot start an identifier since it
+                // opens a lambda.
+                let decorates = |c: char| {
+                    is_modifier(c)
+                        || (!text.is_ascii() && matches!(c, '+' | '*' | '\'' | '!' | '_'))
+                };
                 if !kind.is_delimiter() && self.peek().is_some_and(decorates) {
                     self.bump_while(decorates);
                     return SyntaxKind::SYMBOL;

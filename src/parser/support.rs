@@ -513,6 +513,28 @@ where
     })
 }
 
+/// Runs `parser` with the indentation threshold relaxed by one column, turning
+/// a `colGt` requirement into `colGe`.
+///
+/// A match alternative's tactic block may begin at the alternative's own column:
+///
+/// ```lean
+/// | succ pk hpk =>
+/// obtain ⟨t, ht⟩ := h
+/// ```
+///
+/// The block is anchored at the `|`, so requiring strictly greater indentation
+/// rejects this, and Lean accepts it.
+pub fn relax_indent<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
+{
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let relaxed = inp.ctx().saturating_sub(1);
+        inp.parse(parser.clone().with_ctx(relaxed))
+    })
+}
+
 /// Runs `parser` with the indentation threshold set from the column of the next
 /// token, establishing a new layout position — Lean's `withPosition`.
 pub fn with_position<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone

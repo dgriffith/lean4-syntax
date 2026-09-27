@@ -691,7 +691,8 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((
             tok(KW_LET),
             tok(KW_REC).or_not(),
-            let_lhs.clone(),
+            // `let : Algebra B S := …` names nothing, relying on the type alone.
+            let_lhs.clone().or_not(),
             type_spec(g).or_not(),
             let_value,
             tok(SEMICOLON).or_not(),
