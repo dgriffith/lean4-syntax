@@ -167,3 +167,31 @@ example : P := by
   induction n with
   | zero => simp
   | succ k ih => simp [ih]
+
+-- `else`, `then` and `in` continue an enclosing *term*, so a `by` block inside
+-- one ends before them. mathlib writes this 39 times, always across lines.
+example (n : ℕ) (u v : V) : Finset (G.Walk u v) :=
+  match n with
+  | 0 =>
+    if h : u = v then by
+      subst u
+      exact {Walk.nil}
+    else ∅
+  | n + 1 =>
+    Finset.univ.biUnion fun (w : G.neighborSet u) => g n w v
+
+example {v w : V} : ∀ (p : G.Walk v w) (u : V), u ∈ p.support → G.Walk u w
+  | nil, u, h => by rw [mem_support_nil_iff.mp h]
+  | cons r p, u, h =>
+    if hx : v = u then by
+      subst u
+      exact cons r p
+    else dropUntil p u <| by
+      cases h
+
+-- A tactic-mode `if` keeps its own `then`/`else`, and a term argument may
+-- contain one.
+example : P := by
+  if h : c then simp else ring
+example : P := by
+  exact if h then a else b
