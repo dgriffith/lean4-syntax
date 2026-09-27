@@ -150,3 +150,20 @@ example : P := by
 example : P := by exact { f := 1 }
 example : P := by refine { f := ?_ }
 example : P := by simp; exact { toFun := f }
+
+-- Lean allows a tactic between `with` and the alternatives, which then runs in
+-- every branch.
+example : P := by
+  intro k
+  induction k with intro i j hj hj'
+  | zero =>
+    simp only [add_zero] at hj
+    rw [F.map'_self i]
+  | succ k hk =>
+    rw [← add_assoc] at hj
+    subst hj
+
+example : P := by
+  induction n with
+  | zero => simp
+  | succ k ih => simp [ih]
