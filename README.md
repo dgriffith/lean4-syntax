@@ -261,14 +261,14 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 83.7% |
+| Files parsing with no errors | 83.9% |
 | Files containing a character the lexer cannot classify | **0%** |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% → 83.7%
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% → 83.7% → 83.9%
 as the gaps below were closed.
 
 Unclassifiable characters were the stated ceiling on that rate, and they are now

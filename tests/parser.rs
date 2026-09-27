@@ -299,3 +299,44 @@ fn errors_carry_source_ranges() {
         &src[start..]
     );
 }
+
+/// A tactic inside a comma-separated list ends at the comma, so an anonymous
+/// constructor of `by` blocks keeps one child per proof (#18).
+#[test]
+fn a_comma_ends_a_tactic_only_where_a_comma_separates_items() {
+    use lean4_syntax::SyntaxKind;
+
+    let parse = lean4_syntax::parse("theorem a : P ∧ Q := ⟨by simp, by ring⟩\n");
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let ctor = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == SyntaxKind::ANON_CTOR)
+        .expect("anonymous constructor");
+    assert_eq!(
+        ctor.children()
+            .filter(|n| n.kind() == SyntaxKind::BY_TERM)
+            .count(),
+        2,
+        "each `by` block is its own proof:\n{}",
+        lean4_syntax::syntax::sexpr(&ctor)
+    );
+
+    // The converse: outside a comma-separated list a comma separates a single
+    // tactic's arguments, which is what made an unconditional rule cost 2.6%.
+    let parse = lean4_syntax::parse("theorem c : P := by\n  use 1, 2\n");
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let uses = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == SyntaxKind::TACTIC_TERM_LIST)
+        .expect("`use` tactic");
+    assert_eq!(
+        uses.descendants()
+            .filter(|n| n.kind() == SyntaxKind::LITERAL)
+            .count(),
+        2,
+        "`use 1, 2` passes both arguments to one tactic:\n{}",
+        lean4_syntax::syntax::sexpr(&uses)
+    );
+}

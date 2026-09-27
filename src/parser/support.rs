@@ -39,6 +39,17 @@ pub struct Ctx {
     /// `xs` to a `do` block — so this is false while parsing a loop's
     /// collection, and true elsewhere.
     pub trailing_do: bool,
+    /// Whether a top-level comma ends a tactic.
+    ///
+    /// True inside a comma-separated list, where `⟨by simp, by ring⟩` has two
+    /// proofs and the first `by` block must end at the comma. False elsewhere,
+    /// because `use 1, 2` and `exists a, b` pass comma-separated arguments to a
+    /// single tactic — which is why ending a tactic at every comma cost 2.6% of
+    /// the mathlib clean rate when it was tried unconditionally (#18).
+    ///
+    /// A comma inside brackets needs no help from this: `run` tracks bracket
+    /// depth, so `simp [a, b]` and `rw [h₁, h₂]` are already safe.
+    pub comma_stops: bool,
 }
 
 impl Default for Ctx {
@@ -46,6 +57,7 @@ impl Default for Ctx {
         Ctx {
             col: 0,
             trailing_do: true,
+            comma_stops: false,
         }
     }
 }
@@ -225,6 +237,14 @@ pub fn sep_list<'a, P>(
 where
     P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
 {
+    // Inside a comma-separated list, a top-level comma ends a tactic: the first
+    // `by` block of `⟨by simp, by ring⟩` stops at the comma rather than taking
+    // `, by ring` as more arguments for `simp`. See `Ctx::comma_stops`.
+    let item = if sep == SyntaxKind::COMMA {
+        with_comma_stops(item).boxed()
+    } else {
+        item.boxed()
+    };
     item.clone()
         .then(
             tok(sep)
@@ -453,7 +473,7 @@ pub fn balanced_run<'a>(
     stop: fn(SyntaxKind) -> bool,
     allow_empty: bool,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
-    run(kind, stop, allow_empty, true)
+    run(kind, stop, allow_empty, true, false)
 }
 
 /// A balanced run for a region that is *already* inside brackets, where Lean
@@ -468,7 +488,36 @@ pub fn bracketed_run<'a>(
     stop: fn(SyntaxKind) -> bool,
     allow_empty: bool,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
-    run(kind, stop, allow_empty, false)
+    run(kind, stop, allow_empty, false, false)
+}
+
+/// [`balanced_run`], additionally ending at a top-level comma wherever
+/// [`Ctx::comma_stops`] says a comma separates items.
+///
+/// This is for a tactic's arguments, which is the only region where the question
+/// arises: `⟨by simp, by ring⟩` has two proofs, and without this the first
+/// `simp` takes `, by ring` as its own arguments and the anonymous constructor
+/// ends up with one child instead of two.
+pub fn tactic_arg_run<'a>(
+    kind: SyntaxKind,
+    stop: fn(SyntaxKind) -> bool,
+    allow_empty: bool,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    run(kind, stop, allow_empty, true, true)
+}
+
+/// Runs `parser` with a top-level comma ending any tactic inside it.
+pub fn with_comma_stops<'a, P, O>(parser: P) -> impl Parser<'a, In<'a>, O, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, O, Extra<'a>> + Clone + 'a,
+{
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let ctx = Ctx {
+            comma_stops: true,
+            ..*inp.ctx()
+        };
+        inp.parse(parser.clone().with_ctx(ctx))
+    })
 }
 
 fn run<'a>(
@@ -476,9 +525,11 @@ fn run<'a>(
     stop: fn(SyntaxKind) -> bool,
     allow_empty: bool,
     stop_on_dedent: bool,
+    stop_at_comma: bool,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
         let min = inp.ctx().col;
+        let comma_stops_here = stop_at_comma && inp.ctx().comma_stops;
         let start = inp.cursor();
         let mut kids: Vec<Frag> = Vec::new();
         let mut depth: Vec<SyntaxKind> = Vec::new();
@@ -489,6 +540,11 @@ fn run<'a>(
                     break;
                 }
                 if stop(t.kind) || is_closer(t.kind) {
+                    break;
+                }
+                // A comma ends the run only where a comma separates items;
+                // see `Ctx::comma_stops`.
+                if comma_stops_here && t.kind == SyntaxKind::COMMA {
                     break;
                 }
             }
