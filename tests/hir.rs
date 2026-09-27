@@ -629,3 +629,28 @@ fn every_container_delivers_its_contents() {
         .expect("the `where` helper reaches the HIR");
     assert_eq!(go.1.arms.len(), 2, "and keeps its equations");
 }
+
+/// An as-pattern must reach the HIR with both halves.
+///
+/// Before `AS_PATTERN` was registered in `ast::Term`, an arm containing one came
+/// back with an **empty** pattern list — no error, no `Opaque`, just gone. That
+/// is the same silent-loss class as [`every_container_delivers_its_contents`],
+/// reached from the other direction: adding a node kind to the parser without
+/// teaching the AST about it drops every subtree that kind wraps.
+#[test]
+fn an_as_pattern_keeps_its_name_and_its_pattern() {
+    use lean4_syntax::hir::Pat;
+
+    let parse = lean4_syntax::parse("def f : Nat → Nat\n  | m@(_ + 1) => m\n  | 0 => 0\n");
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let module = lean4_syntax::hir::lower(&parse.syntax());
+    let (_, f) = module.items().next().expect("the definition");
+
+    assert_eq!(f.arms.len(), 2);
+    assert_eq!(f.arms[0].pats.len(), 1, "the as-pattern is not dropped");
+    match &module[f.arms[0].pats[0]] {
+        Pat::As { name, .. } => assert_eq!(name.0, "m", "and binds its name"),
+        other => panic!("expected an as-pattern, got {other:?}"),
+    }
+    assert!(module.errors.is_empty());
+}

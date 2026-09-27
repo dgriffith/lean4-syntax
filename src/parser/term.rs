@@ -1084,6 +1084,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         // to a complete term.
         tok_in(&[MODIFIER, INV]).map(|m| (POSTFIX_TERM, vec![m])),
         adjacent_tok(SYMBOL).map(|m| (POSTFIX_TERM, vec![m])),
+        // `| m@(_ + 1) => m` — an as-pattern binds a name to the whole of what
+        // follows it. Adjacency is what separates it from `@f`, which makes a
+        // function's implicit arguments explicit and is written with a space
+        // before the `@`.
+        group((adjacent_tok(AT), small.clone())).map(|(a, p)| (AS_PATTERN, vec![a, p])),
         group((adjacent_tok(DOT), tok(NUMBER))).map(|(d, n)| (PROJ, vec![d, n])),
         group((adjacent_tok(DOT), field_name())).map(|(d, n)| (FIELD_ACCESS, vec![d, n])),
         // Universe arguments: `Foo.{u, v}`.

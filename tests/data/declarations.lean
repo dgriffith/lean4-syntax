@@ -113,3 +113,15 @@ def with_shared_bodies : WithTop α → WithTop α → Prop
   | ⊤, ⊤ | ⊤, (b : α) => le_rfl
   | 0 | 1 => trivial
   | _, _ => h
+
+/-- An as-pattern binds a name to the whole of what follows it. -/
+def as_patterns : Nat → Nat
+  | m@(_ + 1) => m
+  | 0 => 0
+
+example := match h with | h@(Or.inl _) => h | _ => trivial
+
+-- `@f` makes implicit arguments explicit, and is written with a space.
+example := @Nat.rec
+example := @fun (a : T) => e
+example := f @x

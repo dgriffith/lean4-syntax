@@ -457,6 +457,11 @@ ast_node!(
     POSTFIX_TERM
 );
 ast_node!(
+    /// `m@(_ + 1)` — a pattern that also binds a name to the whole of it.
+    AsPattern,
+    AS_PATTERN
+);
+ast_node!(
     /// `A → B`
     ArrowTerm,
     ARROW_TERM
@@ -943,6 +948,7 @@ ast_enum!(
         Calc(CalcTerm),
         Quoted(QuotedTerm),
         UnivArgs(UnivArgs),
+        AsPattern(AsPattern),
     }
 );
 
