@@ -340,3 +340,46 @@ fn a_comma_ends_a_tactic_only_where_a_comma_separates_items() {
         lean4_syntax::syntax::sexpr(&uses)
     );
 }
+
+/// Several pattern groups may share one body, without separate alternatives
+/// merging into one.
+#[test]
+fn pattern_groups_share_a_body_without_merging_alternatives() {
+    use lean4_syntax::SyntaxKind;
+
+    let parse =
+        lean4_syntax::parse("example := match x with\n  | 0 => a\n  | 1 => b\n  | _ => c\n");
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let alts = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == SyntaxKind::MATCH_ALTS)
+        .expect("alternatives");
+    assert_eq!(
+        alts.children()
+            .filter(|n| n.kind() == SyntaxKind::MATCH_ALT)
+            .count(),
+        3,
+        "three bodies means three alternatives"
+    );
+
+    let parse = lean4_syntax::parse(
+        "example := match a, b with\n  | ⊤, ⊤ | ⊤, (c : α) => le_rfl\n  | _, _ => h\n",
+    );
+    assert!(parse.ok(), "{:?}", parse.errors());
+    let alts = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == SyntaxKind::MATCH_ALTS)
+        .expect("alternatives");
+    let groups: Vec<usize> = alts
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::MATCH_ALT)
+        .map(|a| {
+            a.children()
+                .filter(|n| n.kind() == SyntaxKind::PATTERNS)
+                .count()
+        })
+        .collect();
+    assert_eq!(groups, vec![2, 1], "the first alternative has two groups");
+}

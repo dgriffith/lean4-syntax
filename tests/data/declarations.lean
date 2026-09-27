@@ -107,3 +107,9 @@ protected def map : h.cochainComplex ⟶ h'.cochainComplex where
 instance : Foo where
   a := 1
   b := 2
+
+/-- Several pattern groups may share one body. -/
+def with_shared_bodies : WithTop α → WithTop α → Prop
+  | ⊤, ⊤ | ⊤, (b : α) => le_rfl
+  | 0 | 1 => trivial
+  | _, _ => h
