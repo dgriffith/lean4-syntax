@@ -210,8 +210,11 @@ where
         )),
     );
     // `colGe`, not `colGt`: Lean accepts alternatives back at column 0 even
-    // when the `match` itself sits mid-line.
-    layout_block(MATCH_ALTS, alt, &[], false)
+    // when the `match` itself sits mid-line. `value_anchored` is what actually
+    // delivers that — `colGe` is measured against the enclosing position, which
+    // for a mid-line `match` is its own column, so the alternatives have to
+    // lower the threshold to their own before the comparison means anything.
+    value_anchored(layout_block(MATCH_ALTS, alt, &[], false))
 }
 
 /// The term parser. Defines everything from literals up to the operator table.

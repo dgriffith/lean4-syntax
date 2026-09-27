@@ -288,7 +288,19 @@ fn with_clause<'a>(
     group((
         tok(KW_WITH),
         choice((
-            layout_block(MATCH_ALTS, alt, &[], false),
+            // `value_anchored`, because the tactic that introduced the `with`
+            // is often mid-line while its alternatives are back at the tactic
+            // block's own column:
+            //
+            // ```lean
+            //   intro l; induction l with
+            //   | nil => rfl
+            //   | cons x xs ih => …
+            // ```
+            //
+            // Here `induction` sits at column 12 and the alternatives at 2.
+            // `colGe` against column 12 rejects them.
+            value_anchored(layout_block(MATCH_ALTS, alt, &[], false)),
             node(PATTERNS, sep_list(rcases_pat(g), COMMA)),
         )),
     ))
@@ -416,13 +428,29 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `cases h with | inl a => tac`; `rcases h with ⟨x, hx⟩`;
+    let cases_target = group((group((tok(IDENT), tok(COLON))).or_not(), term.clone()));
+
     // `induction xs using List.rec with …`; `obtain ⟨a, b⟩ : T := e`
     let cases_tactic = node(
         TACTIC_CASES,
         group((
             ident_named(CASES_LIKE),
             config().or_not(),
-            node(TACTIC_TARGETS, sep_list(term.clone(), COMMA)).or_not(),
+            // A target may name the equation hypothesis: `induction hg : s ∪ t`
+            // and `cases h : e` both bind the case's defining equation. The
+            // label stays a sibling of its term rather than wrapping it, so the
+            // terms remain direct children of `TACTIC_TARGETS` — which is what
+            // `terms_in` reads, and wrapping them would silently empty.
+            node(
+                TACTIC_TARGETS,
+                group((
+                    cases_target.clone(),
+                    group((tok(COMMA), cases_target))
+                        .repeated()
+                        .collect::<Vec<_>>(),
+                )),
+            )
+            .or_not(),
             group((tok(KW_USING), term.clone()))
                 .map(|(kw, t)| Frag::Node(USING_CLAUSE, vec![kw, t]))
                 .or_not(),

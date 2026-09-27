@@ -202,3 +202,14 @@ instance : Foo where
     simp)
   total h := sub_eq_zero.mp <| epsilon_total fun i ↦ by
     simp
+
+-- A `where` field's value may start on the next line at exactly its field's own
+-- column. The threshold is then that column, so the *next* field is not read as
+-- one more argument of the value.
+instance punit_algebra : Algebra R PUnit.{v + 1} where
+  algebraMap :=
+  { toFun _ := PUnit.unit
+    map_one' := rfl
+    map_mul' _ _ := rfl }
+  commutes' _ _ := rfl
+  smul_def' _ _ := rfl

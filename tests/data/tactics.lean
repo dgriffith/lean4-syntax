@@ -106,3 +106,32 @@ theorem unknown_tactics (n : Nat) : True := by
   my_custom_tac foo [bar] at h
   another_one <;> trivial
   trivial
+
+-- A `cases`/`induction` target may name the case's defining equation.
+example : P := by
+  induction hg : g₁.support ∪ g₂.support
+    using Finset.eraseInduction generalizing g₁ g₂ with
+  | _ s ih =>
+  obtain h | h := s.eq_empty_or_nonempty <;> subst s
+  · simp_all
+  simp only [ne_eq] at hf
+
+example : P := by
+  cases h : e with
+  | zero => simp
+  | succ n => simp
+
+example : P := by
+  induction n using Nat.rec with
+  | zero => simp
+example : P := by
+  induction n generalizing m with
+  | zero => simp
+
+-- The tactic introducing a `with` is often mid-line while its alternatives are
+-- back at the tactic block's column.
+example : ∀ l : List M, op l.prod = (l.map op).reverse.prod := by
+  intro l; induction l with
+  | nil => rfl
+  | cons x xs ih =>
+    rw [List.prod_cons, op_mul, ih]
