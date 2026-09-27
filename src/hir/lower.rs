@@ -1292,8 +1292,27 @@ impl Ctx {
         // contains several. Collecting all of them rather than the first is what
         // keeps a `mutual` block's later declarations from being dropped
         // silently — nothing would have become `Opaque` to reveal the loss.
+        //
+        // A `where` clause's helper declarations are grandchildren rather than
+        // children:
+        //
+        // ```lean
+        // def f : Nat := go 0 where
+        //   go : Nat → Nat
+        //     | 0 => 1
+        //     | n + 1 => n
+        // ```
+        //
+        // so they need collecting too. `go` — a whole definition with its own
+        // equations — was absent from the HIR, with nothing `Opaque` to say so.
         let nested: Vec<ItemId> = node
             .children()
+            .chain(
+                child_of(node, WHERE_CLAUSE)
+                    .and_then(|w| child_of(&w, WHERE_DECLS))
+                    .into_iter()
+                    .flat_map(|decls| decls.children()),
+            )
             .filter(|n| ast::Command::cast(n.clone()).is_some())
             .collect::<Vec<_>>()
             .into_iter()

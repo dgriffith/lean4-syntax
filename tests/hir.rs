@@ -578,3 +578,54 @@ instance : Mul N where
         "a field defined by equations keeps its alternatives"
     );
 }
+
+/// Every container node must deliver its contents to the HIR, asserted by
+/// **count**.
+///
+/// This is the guard shape that the silent-loss class needs. `Opaque` records
+/// only what lowering reached and declined; a subtree lowering never visits
+/// cannot appear in the opaque count, so a test asserting "no errors" passes
+/// while the content is gone. Three bugs of this class have been found —
+/// `mutual … end` keeping only its first declaration, an `instance … where`
+/// body absent entirely, and a `where` clause's helper definitions — and each
+/// would have been caught here.
+#[test]
+fn every_container_delivers_its_contents() {
+    fn lower(src: &str) -> lean4_syntax::hir::Module {
+        let parse = lean4_syntax::parse(src);
+        assert!(parse.ok(), "{src:?}: {:?}", parse.errors());
+        lean4_syntax::hir::lower(&parse.syntax())
+    }
+
+    let module = lower("mutual\ndef a : Nat := 1\ndef b : Nat := 2\nend\n");
+    let nested: usize = module.items().map(|(_, i)| i.nested.len()).sum();
+    assert_eq!(nested, 2, "`mutual` keeps both declarations");
+
+    let module = lower("inductive T\n  | a\n  | b\n  | c\n  deriving Repr, DecidableEq\n");
+    let (_, t) = module.items().next().expect("the inductive");
+    assert_eq!(t.ctors.len(), 3, "three constructors");
+    assert_eq!(t.deriving.len(), 2, "two deriving clauses");
+
+    let module = lower("variable (α) in\ndef f : Nat := 1\n");
+    let nested: usize = module.items().map(|(_, i)| i.nested.len()).sum();
+    assert_eq!(nested, 1, "`variable … in` keeps the command it scopes");
+
+    let module = lower("structure S where\n  a : Nat\n  b : Nat\n");
+    let (_, s) = module.items().next().expect("the structure");
+    assert_eq!(s.fields.len(), 2, "two fields");
+
+    let module = lower("instance : Add N where\n  add := foo\n  zero := bar\n");
+    let (_, inst) = module.items().next().expect("the instance");
+    assert_eq!(inst.fields.len(), 2, "an instance body's fields");
+
+    // A `where` clause's helper declarations are grandchildren, so collecting
+    // only direct children left `go` — a whole definition with its own
+    // equations — out of the HIR.
+    let module =
+        lower("def f : Nat := go 0 where\n  go : Nat → Nat\n    | 0 => 1\n    | n + 1 => n\n");
+    let go = module
+        .items()
+        .find(|(_, i)| i.name.as_ref().is_some_and(|n| n.0 == "go"))
+        .expect("the `where` helper reaches the HIR");
+    assert_eq!(go.1.arms.len(), 2, "and keeps its equations");
+}
