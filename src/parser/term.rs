@@ -173,6 +173,31 @@ pub fn binders_opt<'a>(
 pub fn match_alts<'a>(
     g: &Grammar<'a>,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + use<'a> {
+    match_alts_with(g, g.term.clone())
+}
+
+/// [`match_alts`], with the arm body spelled out.
+///
+/// A `match` in statement position inside `do` takes a *do sequence* as each
+/// arm's body, not a term — Lean's `doMatch`. That is what lets an arm run
+/// several statements:
+///
+/// ```lean
+///   match b with
+///   | .azure =>
+///     let token ← getAzureAuth
+///     azurePutStaged dest token
+/// ```
+///
+/// `let token ← …` is a do statement and no term at all, so a term-bodied
+/// alternative cannot parse it.
+pub fn match_alts_with<'a, P>(
+    g: &Grammar<'a>,
+    body: P,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + use<'a, P>
+where
+    P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
+{
     let term = g.term.clone();
     let alt = node(
         MATCH_ALT,
@@ -181,7 +206,7 @@ pub fn match_alts<'a>(
             tok(PIPE),
             node(PATTERNS, sep_list(term.clone(), COMMA)),
             tok(FAT_ARROW),
-            term.clone(),
+            body,
         )),
     );
     // `colGe`, not `colGt`: Lean accepts alternatives back at column 0 even
@@ -516,7 +541,13 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     STRUCT_INST_SRC,
                     group((sep_list(term.clone(), COMMA), tok(KW_WITH))),
                 ),
-                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[COMMA], false).or_not(),
+                layout_block(
+                    STRUCT_FIELD_LIST,
+                    struct_field.clone(),
+                    &[COMMA, SEMICOLON],
+                    false,
+                )
+                .or_not(),
                 tok(R_BRACE),
             )),
         ),
@@ -539,7 +570,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                             term.clone(),
                         )),
                     ),
-                    &[COMMA],
+                    &[COMMA, SEMICOLON],
                     false,
                 ),
                 tok(R_BRACE),
@@ -557,6 +588,29 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tok(R_BRACE),
             )),
         ),
+        // `{f i | i : ι}`, `{(i, j) | i : ι, j : κ}` — set-image notation, where
+        // the ascription is on the bound variable to the *right* of the bar
+        // rather than on the element to its left. Tried after `SET_OF` above,
+        // whose right-hand side is a term: `{x | p x}` must keep that reading,
+        // and `{f i j | (i : ι) (j : κ)}` already gets it, since a parenthesized
+        // ascription is itself a term.
+        node(
+            SET_OF,
+            group((
+                tok(L_BRACE),
+                term.clone(),
+                tok(PIPE),
+                node(
+                    BINDERS,
+                    sep_list(
+                        group((tok_in(&[IDENT, UNDERSCORE]), type_spec(g)))
+                            .map(|(i, t)| Frag::Node(SIMPLE_BINDER, vec![i, t])),
+                        COMMA,
+                    ),
+                ),
+                tok(R_BRACE),
+            )),
+        ),
         node(
             SET_LIT,
             group((tok(L_BRACE), comma_terms.clone(), tok(R_BRACE))),
@@ -570,7 +624,12 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             STRUCT_INST,
             group((
                 tok(L_BRACE),
-                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[COMMA], false),
+                layout_block(
+                    STRUCT_FIELD_LIST,
+                    struct_field.clone(),
+                    &[COMMA, SEMICOLON],
+                    false,
+                ),
                 tok(R_BRACE),
             )),
         ),
@@ -812,7 +871,20 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         ),
     ));
 
-    let do_term = node(DO_TERM, group((tok(KW_DO), g.do_seq.clone())));
+    // A `do` body's statements need only line up with each other; nothing ties
+    // them to the syntax that introduced the `do`. mathlib relies on it:
+    //
+    // ```lean
+    //   match pα? with | none => pure .none | some _ => do
+    //   let (.app f a) ← whnfR e | throwError "not abv"
+    //   …
+    // ```
+    //
+    // where the body sits at the same column as the arm's own `|`. Relaxing is
+    // confined to the `do` body: relaxing a whole arm body instead let a
+    // *nested* `match` swallow the enclosing alternatives, which
+    // `nested_matches_are_separated_by_indentation` catches.
+    let do_term = node(DO_TERM, group((tok(KW_DO), unanchored(g.do_seq.clone()))));
     // Kept for use as a trailing application argument, below.
     let trailing_do_arg = do_term.clone();
 
@@ -944,7 +1016,15 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         // draws.
         group((
             adjacent_tok(L_BRACKET),
-            sep_list(term.clone(), COMMA).or_not(),
+            choice((
+                sep_list(term.clone(), COMMA),
+                // `𝓝[>] 0`, `𝓝[≠] z₀`, `⨍[*]` — a filter or measure modifier is a
+                // bare operator, which is not a term: `>` has its own token
+                // kind, so it is not even a generic-symbol atom. Tried after
+                // the term list so that `xs[i]` and `⊗[R]` are untouched.
+                any_tok_if(|k| k.is_symbol() && !k.is_delimiter()).map(|t| vec![t]),
+            ))
+            .or_not(),
             tok(R_BRACKET),
             // `xs[i]?`, `xs[i]!`, and `xs[i]'h` which supplies the in-bounds
             // proof directly.
@@ -1130,7 +1210,33 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tok(R_ANGLE_ANON),
             )),
         ),
+        // `let (s, _) ← monitorCurl …` destructures a pair, and
+        // `let (.app f a) ← whnfR e | …` matches a constructor.
+        node(
+            TUPLE,
+            group((tok(L_PAREN), sep_list(term.clone(), COMMA), tok(R_PAREN))),
+        ),
+        // The same constructor pattern without the parentheses:
+        // `let .app (.app _ a) b ← withReducible (whnf e) | …`
+        group((tok(DOT), tok(IDENT), binders_opt(g)))
+            .map(|(d, n, b)| Frag::Node(PATTERNS, vec![d, n, b])),
     ));
+
+    // A pattern-matching `let` in `do` may give the failure branch inline:
+    //
+    // ```lean
+    //   let some value := nonEmptyEnvValue value? | return ifUnset
+    //   let some scope ← getRepoScope | return false
+    // ```
+    //
+    // The `col_gt` guard is what keeps this from swallowing the next match
+    // alternative when the `let` is the last statement of an arm's body — a
+    // `|` back at the arm's own column belongs to the `match`, not to the
+    // `let`. Omitting that guard is the single most repeated bug in this
+    // parser; see `col_gt`.
+    let else_branch = group((col_gt(), tok(PIPE), g.do_seq.clone()))
+        .map(|(_, p, body)| Frag::Node(DO_ELSE, vec![p, body]))
+        .or_not();
 
     let item = choice((
         // `let x ← e` and `let mut x := e`
@@ -1143,6 +1249,7 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 type_spec(g).or_not(),
                 tok_in(&[LEFT_ARROW, LEFT_ARROW_ASCII]),
                 term.clone(),
+                else_branch.clone(),
             )),
         ),
         node(
@@ -1154,6 +1261,7 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 type_spec(g).or_not(),
                 tok(COLON_EQ),
                 term.clone(),
+                else_branch.clone(),
             )),
         ),
         // `x ← e`
@@ -1238,6 +1346,28 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 without_trailing_do(term.clone()),
                 tok(KW_DO),
                 g.do_seq.clone(),
+            )),
+        ),
+        // A `match` in statement position takes a do sequence per arm — Lean's
+        // `doMatch`. Tried before `DO_EXPR`, which would read the `match` as a
+        // term and so allow only a single-term body per arm.
+        node(
+            DO_MATCH,
+            group((
+                tok(KW_MATCH),
+                sep_list(
+                    group((group((tok(IDENT), tok(COLON))).or_not(), term.clone())).map(
+                        |(h, t)| {
+                            let mut kids = Vec::new();
+                            h.push_kids(&mut kids);
+                            kids.push(t);
+                            Frag::Node(MATCH_DISCRS, kids)
+                        },
+                    ),
+                    COMMA,
+                ),
+                tok(KW_WITH),
+                match_alts_with(g, g.do_seq.clone()),
             )),
         ),
         node(DO_EXPR, term.clone()),
