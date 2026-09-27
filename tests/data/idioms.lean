@@ -242,3 +242,17 @@ example := |x|
 def factorial_arms : Nat → Nat
   | 0 => 1
   | n + 1 => n
+
+/-- `_` stands wherever a name-before-colon does. -/
+example := if _ : i < n then a else b
+example := (fun i ↦ if _ : i < n then M i else N i) m = M m
+
+/-- A coerced term in argument position may carry its type. -/
+example := f ↑(1 : G)
+def endMulEquivSubgroup (H : Subgroup G) : End (objEquiv G (G ⧸ H) ↑(1 : G)) ≃* H := f
+
+-- The named forms these generalise must keep working.
+example := if h : i < n then a else b
+example := match h : e with | 0 => a
+example (x : T) [inst : Monad m] : P := by simp
+example := by induction h : e with | zero => simp

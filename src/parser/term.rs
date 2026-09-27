@@ -135,7 +135,7 @@ pub fn bracket_binder<'a>(
             INST_BINDER,
             group((
                 tok(L_BRACKET),
-                group((tok(IDENT), tok(COLON))).or_not(),
+                group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
                 term.clone(),
                 tok(R_BRACKET),
             )),
@@ -342,9 +342,15 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 choice((
                     coerced,
                     node(REF, ident()),
+                    // `f ↑(1 : G)` — the coerced term may carry its type.
                     node(
                         PAREN_TERM,
-                        group((tok(L_PAREN), term.clone(), tok(R_PAREN))),
+                        group((
+                            tok(L_PAREN),
+                            term.clone(),
+                            type_spec(g).or_not(),
+                            tok(R_PAREN),
+                        )),
                     ),
                 )),
             )),
@@ -851,7 +857,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     ));
 
     // `match h : e, e' with | …`
-    let discr = group((group((tok(IDENT), tok(COLON))).or_not(), term.clone())).map(|(h, t)| {
+    let discr = group((
+        group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
+        term.clone(),
+    ))
+    .map(|(h, t)| {
         let mut kids = Vec::new();
         h.push_kids(&mut kids);
         kids.push(t);
@@ -890,7 +900,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             IF_TERM,
             group((
                 tok(KW_IF),
-                group((tok(IDENT), tok(COLON))).or_not(),
+                group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
                 term.clone(),
                 tok(KW_THEN),
                 term.clone(),
@@ -1338,7 +1348,7 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             DO_IF,
             group((
                 tok(KW_IF),
-                group((tok(IDENT), tok(COLON))).or_not(),
+                group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
                 term.clone(),
                 tok(KW_THEN),
                 g.do_seq.clone(),
@@ -1385,14 +1395,16 @@ pub fn do_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             group((
                 tok(KW_MATCH),
                 sep_list(
-                    group((group((tok(IDENT), tok(COLON))).or_not(), term.clone())).map(
-                        |(h, t)| {
-                            let mut kids = Vec::new();
-                            h.push_kids(&mut kids);
-                            kids.push(t);
-                            Frag::Node(MATCH_DISCRS, kids)
-                        },
-                    ),
+                    group((
+                        group((tok_in(&[IDENT, UNDERSCORE]), tok(COLON))).or_not(),
+                        term.clone(),
+                    ))
+                    .map(|(h, t)| {
+                        let mut kids = Vec::new();
+                        h.push_kids(&mut kids);
+                        kids.push(t);
+                        Frag::Node(MATCH_DISCRS, kids)
+                    }),
                     COMMA,
                 ),
                 tok(KW_WITH),
