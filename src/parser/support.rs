@@ -314,6 +314,14 @@ pub fn is_closer(kind: SyntaxKind) -> bool {
 /// Zero-width check that the next token is indented past the enclosing
 /// position — Lean's `colGt`.
 ///
+/// **Any `repeated()` over tokens that could begin a new line needs this
+/// guard.** Five separate bugs in this parser have come from omitting it: an
+/// application absorbing the following line, `intros` claiming the next tactic
+/// as a pattern, an import list swallowing the next command's name, a `have`
+/// eating its own body, and `at hA` taking the following `rw` as another
+/// hypothesis. The symptom is always the same — the construct parses in
+/// isolation and fails in place.
+///
 /// Tokens later on the same line as the enclosing position always satisfy this,
 /// so one column comparison covers both "same line" and "properly indented
 /// continuation".

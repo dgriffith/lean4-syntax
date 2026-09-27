@@ -274,7 +274,11 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 node(
                     SIMPLE_BINDER,
                     group((
-                        tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+                        tok(IDENT),
+                        col_gt()
+                            .ignore_then(tok(IDENT))
+                            .repeated()
+                            .collect::<Vec<_>>(),
                         // A field may take arguments: `G_le_6 (i) : #(G i) ≤ 6`
                         binders_opt(g),
                         type_spec(g),

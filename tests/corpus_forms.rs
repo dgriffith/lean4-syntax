@@ -6,7 +6,7 @@
 //! these tests pin what they parse *into*.
 
 use lean4_syntax::SyntaxKind::*;
-use lean4_syntax::ast::{AstNode, Command, HasDecl, SourceFile, Term};
+use lean4_syntax::ast::{AstNode, Command, HasDecl, SourceFile, TacticSeq, Term};
 use lean4_syntax::syntax::sexpr;
 
 fn parse_clean(src: &str) -> lean4_syntax::Parse {
@@ -660,4 +660,30 @@ fn a_docstring_may_precede_a_command_that_does_not_take_one() {
     let src = "/-- doc -/\ndef f := 1\n";
     assert_eq!(count(src, DOCUMENTED_CMD), 0);
     assert_eq!(count(src, DECL_MODIFIERS), 1);
+}
+
+#[test]
+fn a_location_clause_stops_at_the_end_of_its_line() {
+    // `at hA` followed by `rw [a]` on the next line was taking `rw` as another
+    // hypothesis, which then broke the tactic after it. The fifth instance of
+    // an unguarded `repeated()` crossing a line break.
+    let src = "example : True := by\n  have hx : 1 < x := by rwa [h.iff] at hA\n  rw [a] at h <;> linarith\n";
+    let parse = parse_clean(src);
+    // Two tactics in the outer block, not one.
+    let outer = parse
+        .syntax()
+        .descendants()
+        .find(|n| n.kind() == TACTIC_SEQ)
+        .expect("a tactic sequence");
+    assert_eq!(
+        TacticSeq::cast(outer.clone()).unwrap().tactics().count(),
+        2,
+        "{}",
+        sexpr(&outer)
+    );
+
+    // Multi-hypothesis locations still work.
+    parse_clean("example : True := by\n  simp at h1 h2 ⊢\n");
+    parse_clean("example : True := by\n  simp at *\n");
+    parse_clean("example : True := by\n  induction n generalizing m k with\n  | zero => trivial\n");
 }
