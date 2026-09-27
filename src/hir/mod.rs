@@ -256,6 +256,9 @@ pub enum ArmBody {
     Term(TermId),
     /// A tactic sequence, as in `induction n with | zero => rfl`.
     Tactic(TacticId),
+    /// A do sequence, as in a `match` in statement position inside `do`, where
+    /// an arm may run several statements.
+    Do(Vec<DoStmt>),
 }
 
 /// One field of a structure instance.
@@ -279,19 +282,23 @@ pub struct CalcStep {
 /// One statement of a `do` block.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DoStmt {
-    /// `let x := e`
+    /// `let x := e`, or `let some x := e | return none` with a failure branch.
     Let {
         pat: PatId,
         ty: Option<TermId>,
         value: TermId,
         mutable: bool,
+        /// The `| …` branch taken when the pattern does not match.
+        else_branch: Option<Vec<DoStmt>>,
     },
-    /// `let x ← e`
+    /// `let x ← e`, likewise failable.
     LetArrow {
         pat: PatId,
         ty: Option<TermId>,
         value: TermId,
         mutable: bool,
+        /// The `| …` branch taken when the pattern does not match.
+        else_branch: Option<Vec<DoStmt>>,
     },
     /// `x ← e`
     Bind { pat: PatId, value: TermId },
@@ -323,6 +330,8 @@ pub enum DoStmt {
     Break,
     /// `continue`
     Continue,
+    /// `match e with | p => …`, where each arm is a do sequence.
+    Match { discrs: Vec<TermId>, arms: Vec<Arm> },
     /// A bare expression.
     Expr(TermId),
     /// A statement lowering did not model.

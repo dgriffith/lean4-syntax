@@ -302,6 +302,23 @@ impl<'a> Lexer<'a> {
     /// and a nested literal is scanned past. Depth is only tracked for an
     /// interpolated string, because `"{"` is a perfectly good ordinary one and
     /// tracking it there would never terminate.
+    /// A newline does *not* end a string. Lean lets a literal span lines, and
+    /// mathlib relies on it for expected-message tests:
+    ///
+    /// ```lean
+    /// success_if_fail_with_msg
+    ///   "Tactic `gcongr` failed: ...
+    ///
+    /// x y : ℕ
+    /// ⊢ f x ≤ f y"
+    ///   (gcongr f ?a)
+    /// ```
+    ///
+    /// Stopping at the newline treated the rest as unclassifiable text, which
+    /// was every one of the 42 files whose characters the lexer could not
+    /// classify — the stated ceiling on the clean rate. The cost is that a
+    /// genuinely unterminated string now runs to end of file rather than to
+    /// end of line; that is what Lean does too, and mathlib has none.
     fn string(&mut self) -> SyntaxKind {
         let interpolated = self.after_interpolation_prefix();
         self.bump(); // opening quote
@@ -309,9 +326,6 @@ impl<'a> Lexer<'a> {
         loop {
             match self.peek() {
                 None => return SyntaxKind::LEX_ERROR, // unterminated
-                // A newline ends an unterminated string, but an embedded term
-                // may legitimately span lines.
-                Some('\n') if depth == 0 => return SyntaxKind::LEX_ERROR,
                 Some('"') if depth == 0 => {
                     self.bump();
                     return SyntaxKind::STRING;
@@ -582,11 +596,56 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// How many characters of an ASCII operator run start here.
+    ///
+    /// Lean has no fixed operator grammar: a token is a token because some
+    /// notation declared it, and mathlib declares plenty — `<:+` for list
+    /// suffix, `>=>` for Kleisli composition, `<&&>`, `^^^`, `+-+`. We cannot
+    /// read Lean's token table, so a maximal run of operator characters is
+    /// taken to be one token, which is what the table would have made it.
+    ///
+    /// Two guards:
+    ///
+    /// * The run stops before `--` and `/-`, or it would swallow the start of
+    ///   a comment. mathlib really does write `<--` and `|--`.
+    /// * A run may contain `|` but not begin with one, so that a match
+    ///   alternative's `|`, and `|x|` around a negation, still lex as `PIPE`.
+    ///   This gives up `|||` (18 uses) to keep `| -x => …` (structural).
+    ///
+    /// Merging is safe for what the parser accepts even where it guesses
+    /// wrong: a generic `SYMBOL` is infix at an assumed precedence, so `a *-b`
+    /// still parses — as one operator rather than `a * (-b)`, which is a
+    /// fidelity cost in the tree, not a parse failure. There are about 80 such
+    /// spots in mathlib.
+    fn ascii_op_run(&self) -> usize {
+        let rest = &self.src[self.pos..];
+        let mut n = 0;
+        for (i, c) in rest.char_indices() {
+            if !is_ascii_op(c) {
+                break;
+            }
+            if n > 0 && (rest[i..].starts_with("--") || rest[i..].starts_with("/-")) {
+                break;
+            }
+            if c == '|' && n == 0 {
+                break;
+            }
+            n += 1;
+        }
+        n
+    }
+
     /// Longest-match punctuation, then the generic notation fallbacks, then a
     /// one-character error token.
     fn symbol(&mut self) -> SyntaxKind {
+        let run = self.ascii_op_run();
         for (text, kind) in SORTED_SYMBOLS.iter() {
             if self.starts_with(text) {
+                // A longer operator run wins over the table: `<` is `LT`, but
+                // `<:+` is one symbol, not `LT COLON PLUS`.
+                if run > text.chars().count() {
+                    break;
+                }
                 for _ in 0..text.chars().count() {
                     self.bump();
                 }
@@ -613,6 +672,14 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        if run > 0 {
+            for _ in 0..run {
+                self.bump();
+            }
+            self.bump_while(is_modifier);
+            return SyntaxKind::SYMBOL;
+        }
+
         let c = self.peek().expect("caller checked for input");
         if is_modifier(c) {
             // A modifier run that begins a token is postfix notation applied to
@@ -628,6 +695,18 @@ impl<'a> Lexer<'a> {
         self.bump();
         SyntaxKind::LEX_ERROR
     }
+}
+
+/// Characters that make up an ASCII operator run.
+///
+/// `.` `,` `;` `@` `#` `_` `'` `"` `\` are excluded: they are structural or
+/// part of identifiers and literals, and merging them would change how
+/// projections, argument lists and character literals lex.
+fn is_ascii_op(c: char) -> bool {
+    matches!(
+        c,
+        '<' | '>' | '=' | '!' | '~' | '^' | '*' | '/' | '+' | '&' | ':' | '%' | '$' | '-' | '|'
+    )
 }
 
 /// Tokenizes `src`, including whitespace and comments.

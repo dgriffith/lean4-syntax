@@ -632,6 +632,48 @@ where
     })
 }
 
+/// Runs `parser` anchored on its own first token rather than on the enclosing
+/// position, so a block need only line up with itself — Lean's `withPosition`
+/// combined with `colGe`.
+///
+/// This is what a `do` body needs. Nothing ties its statements to the syntax
+/// that introduced the `do`, and mathlib relies on that:
+///
+/// ```lean
+///   match pα? with | none => pure .none | some _ => do
+///   let (.app f a) ← whnfR e | throwError "not abv"
+///   …
+/// ```
+///
+/// Here the arm's `|` sits mid-line, so the body at column 2 is nowhere near
+/// it; [`relax_indent`] cannot reach that far, since it only gives up one
+/// column. Anchoring on the first token still bounds the block — a later token
+/// at a smaller column ends it — which is what stops a `do` body from eating
+/// the next field of an enclosing structure instance, or the next declaration.
+///
+/// The threshold only ever *drops*. Taking the first token's column outright
+/// raises it whenever a block begins mid-line, which rejects the block's own
+/// continuation lines:
+///
+/// ```lean
+///   monotone' := monotone_iff_forall_lt.2 (by
+///     simp)
+/// ```
+///
+/// Here the value starts at column 15 and continues at column 4. Anchoring on
+/// column 15 threw that away and cost 5.4% of the mathlib clean rate.
+pub fn unanchored<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone
+where
+    P: Parser<'a, In<'a>, Frag, Extra<'a>> + Clone + 'a,
+{
+    custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
+        let first = inp.peek().map(|t| t.col).unwrap_or(0);
+        let enclosing = inp.ctx().col;
+        let ctx = inp.ctx().at(enclosing.min(first.saturating_sub(1)));
+        inp.parse(parser.clone().with_ctx(ctx))
+    })
+}
+
 /// Runs `parser` with the indentation threshold set from the column of the next
 /// token, establishing a new layout position — Lean's `withPosition`.
 pub fn with_position<'a, P>(parser: P) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone

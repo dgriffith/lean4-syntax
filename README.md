@@ -261,17 +261,22 @@ cannot handle. Against **mathlib4 at `516d3125`** — 9,160 files, 102 MB:
 |---|---|
 | Round-trip failures | **0** |
 | Panics | **0** |
-| Files parsing with no errors | 81.3% |
-| Files containing a character the lexer cannot classify | 0.5% |
+| Files parsing with no errors | 83.7% |
+| Files containing a character the lexer cannot classify | **0%** |
 
 The first two numbers are the ones that had to be zero: losslessness and
 not-crashing are unconditional promises, and they hold across 102 MB of real
 Lean including every construct mathlib uses.
 
-The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% as the
-gaps below were closed.
-Unclassifiable characters, once present in 78.4% of files and the hard ceiling on
-that rate, are now down to 0.5%.
+The clean rate has moved 0.5% → 9.3% → 30.8% → 46.1% → 63.5% → 72.3% → 80.6% → 81.3% → 83.7%
+as the gaps below were closed.
+
+Unclassifiable characters were the stated ceiling on that rate, and they are now
+gone: every character in 102 MB of Lean reaches the parser as something
+meaningful. They fell from 78.4% of files to 0.5% by treating any non-ASCII
+non-space character as notation, and from 0.5% to zero by letting a string
+literal contain a newline — which Lean allows, and mathlib's expected-message
+tests rely on.
 
 One shape of bug accounted for five of them, and is now documented at
 `col_gt`: an unguarded `repeated()` over tokens that could begin a new line.
@@ -308,7 +313,7 @@ rule they all needed is the one application arguments already had: a
 continuation must be indented past the position its construct was anchored at.
 
 Lowering to the HIR is measured the same way, by `examples/lower_report.rs`.
-Over the same corpus it produces **9.4M HIR nodes with zero panics**, and 0.7% of
+Over the same corpus it produces **10.1M HIR nodes with zero panics**, and 0.7% of
 those nodes are `Opaque` — all of them at the two deliberate boundaries,
 uninterpreted tactics and syntax quotations. Zero `LoweringError`s, meaning
 nothing was recognised and then failed to lower.

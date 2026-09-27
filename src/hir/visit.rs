@@ -296,6 +296,7 @@ fn visit_arms(arms: &mut [Arm], v: &mut dyn Visitor) {
         match &mut arm.body {
             ArmBody::Term(t) => v.term(t),
             ArmBody::Tactic(t) => v.tactic(t),
+            ArmBody::Do(stmts) => visit_do(stmts, v),
         }
     }
 }
@@ -311,10 +312,26 @@ fn visit_do(stmts: &mut [DoStmt], v: &mut dyn Visitor) {
     for stmt in stmts {
         match stmt {
             DoStmt::Break | DoStmt::Continue | DoStmt::Opaque(_) => {}
-            DoStmt::Let { pat, ty, value, .. } | DoStmt::LetArrow { pat, ty, value, .. } => {
+            DoStmt::Let {
+                pat,
+                ty,
+                value,
+                else_branch,
+                ..
+            }
+            | DoStmt::LetArrow {
+                pat,
+                ty,
+                value,
+                else_branch,
+                ..
+            } => {
                 v.pat(pat);
                 opt_term(ty, v);
                 v.term(value);
+                if let Some(stmts) = else_branch {
+                    visit_do(stmts, v);
+                }
             }
             DoStmt::Bind { pat, value } => {
                 v.pat(pat);
@@ -323,6 +340,12 @@ fn visit_do(stmts: &mut [DoStmt], v: &mut dyn Visitor) {
             DoStmt::Reassign { value, .. } => v.term(value),
             DoStmt::Return(term) => opt_term(term, v),
             DoStmt::Expr(term) => v.term(term),
+            DoStmt::Match { discrs, arms } => {
+                for d in discrs {
+                    v.term(d);
+                }
+                visit_arms(arms, v);
+            }
             DoStmt::If {
                 cond,
                 then_branch,

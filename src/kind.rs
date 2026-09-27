@@ -552,6 +552,8 @@ kinds! {
         DO_TRY,
         DO_CATCH,
         DO_FINALLY,
+        DO_ELSE,
+        DO_MATCH,
         DO_RETURN,
         DO_BREAK,
         DO_CONTINUE,

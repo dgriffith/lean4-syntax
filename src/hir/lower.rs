@@ -770,15 +770,19 @@ impl Ctx {
                         .collect(),
                     None => Vec::new(),
                 };
-                // The right-hand side is a tactic sequence in tactic position
-                // and a term otherwise.
-                let body = match child_of(&alt, TACTIC_SEQ) {
-                    Some(seq) => ArmBody::Tactic(self.tactic_seq(&seq)),
-                    None => ArmBody::Term(self.term_or_gap(
+                // The right-hand side is a tactic sequence in tactic position,
+                // a do sequence inside `do`, and a term otherwise. This is the
+                // one place that has to know which.
+                let body = if let Some(seq) = child_of(&alt, TACTIC_SEQ) {
+                    ArmBody::Tactic(self.tactic_seq(&seq))
+                } else if let Some(seq) = child_of(&alt, DO_SEQ) {
+                    ArmBody::Do(self.do_seq(&seq))
+                } else {
+                    ArmBody::Term(self.term_or_gap(
                         term_children(&alt).last().cloned(),
                         &alt,
                         "alternative body",
-                    )),
+                    ))
                 };
                 Arm { pats, body }
             })
@@ -810,6 +814,7 @@ impl Ctx {
                         | DO_UNLESS
                         | DO_BREAK
                         | DO_CONTINUE
+                        | DO_MATCH
                         | DO_EXPR
                 )
             })
@@ -829,12 +834,17 @@ impl Ctx {
                 let ty = self.type_spec(node);
                 let value =
                     self.term_or_gap(term_children(node).last().cloned(), node, "let value");
+                // A failure branch is wrapped in `DO_ELSE`, so its own terms
+                // are not direct children here and cannot be mistaken for the
+                // value.
+                let else_branch = child_of(node, DO_ELSE).map(|e| self.do_seq(&e));
                 if node.kind() == DO_LET {
                     DoStmt::Let {
                         pat,
                         ty,
                         value,
                         mutable,
+                        else_branch,
                     }
                 } else {
                     DoStmt::LetArrow {
@@ -842,7 +852,19 @@ impl Ctx {
                         ty,
                         value,
                         mutable,
+                        else_branch,
                     }
+                }
+            }
+            DO_MATCH => {
+                let discrs = children_of(node, MATCH_DISCRS)
+                    .into_iter()
+                    .filter_map(|d| term_children(&d).last().cloned())
+                    .map(|t| self.term(&t))
+                    .collect();
+                DoStmt::Match {
+                    discrs,
+                    arms: self.arms_in(node),
                 }
             }
             DO_BIND => {

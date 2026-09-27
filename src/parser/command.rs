@@ -172,6 +172,18 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     );
 
     // `where` in value position: `instance : Monad M where pure := …`
+    //
+    // The value is `unanchored` because it may begin on the next line at a
+    // column well to the *left* of the field name, which sits mid-line:
+    //
+    // ```lean
+    // meta def … : PositivityExt where eval {_ _α} _zα pα? e :=
+    //   match pα? with | none => pure .none | some _ => do
+    //   …
+    // ```
+    //
+    // Anchoring the value on its own first token still ends it at the next
+    // field, since that field is at a smaller column.
     let where_field = node(
         STRUCT_INST_FIELD,
         group((
@@ -179,7 +191,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             binders_opt(g),
             type_spec(g).or_not(),
             tok(COLON_EQ),
-            term.clone(),
+            unanchored(term.clone()),
         )),
     );
 
@@ -192,7 +204,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tok(KW_WHERE),
                 // `instance : (forget₂ A B).Braided where` introduces no fields:
                 // the instance is satisfied entirely by defaults.
-                layout_block(STRUCT_FIELD_LIST, where_field.clone(), &[], true).or_not(),
+                layout_block(STRUCT_FIELD_LIST, where_field.clone(), &[SEMICOLON], true).or_not(),
             )),
         ),
         // Pattern-matching equations: `def f : Nat → Nat | 0 => 1 | n+1 => n`
@@ -338,7 +350,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tok(KW_WHERE),
                 // The constructor may be named: `where mk ::`
                 group((tok(IDENT), tok(DOUBLE_COLON))).or_not(),
-                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[], true).or_not(),
+                layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[SEMICOLON], true).or_not(),
             ))
             .or_not(),
             deriving.clone().or_not(),
@@ -379,7 +391,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             group((
                 tok(KW_WHERE),
                 group((tok(IDENT), tok(DOUBLE_COLON))).or_not(),
-                layout_block(STRUCT_FIELD_LIST, struct_field, &[], true).or_not(),
+                layout_block(STRUCT_FIELD_LIST, struct_field, &[SEMICOLON], true).or_not(),
             ))
             .or_not(),
             deriving.clone().or_not(),
