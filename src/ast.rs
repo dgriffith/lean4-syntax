@@ -582,6 +582,11 @@ ast_node!(
     ARRAY_LIT
 );
 ast_node!(
+    /// `xs[i]`, `xs[i]?`, `xs[i]!`, `xs[i]'h`, and `R⟦X⟧`.
+    Index,
+    INDEX
+);
+ast_node!(
     /// A notation character with no rule of its own, used as a term: `⊤`, `∞`.
     SymbolTerm,
     SYMBOL_TERM
@@ -923,6 +928,7 @@ ast_enum!(
         Set(SetLit),
         Range(RangeLit),
         Array(ArrayLit),
+        Index(Index),
         Symbol(SymbolTerm),
         NotationBracket(NotationBracket),
         NamedArg(NamedArg),

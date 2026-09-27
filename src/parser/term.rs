@@ -349,6 +349,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         node(
             NOTATION_BRACKET,
             group((
+                tok(L_DOUBLE_BRACKET),
+                sep_list(term.clone(), COMMA).or_not(),
+                tok(R_DOUBLE_BRACKET),
+            )),
+        ),
+        node(
+            NOTATION_BRACKET,
+            group((
                 tok(L_LIE),
                 sep_list(term.clone(), COMMA).or_not(),
                 tok(R_LIE),
@@ -500,7 +508,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                     STRUCT_FIELD_LIST,
                     node(
                         STRUCT_INST_FIELD,
-                        group((tok(IDENT), tok(COLON_EQ), term.clone())),
+                        group((
+                            tok(IDENT),
+                            // `toFun _ := PUnit.unit` — a field may take its own
+                            // arguments.
+                            binders_opt(g),
+                            tok(COLON_EQ),
+                            term.clone(),
+                        )),
                     ),
                     &[COMMA],
                     false,
@@ -604,7 +619,10 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 // A decorated big operator — `∫ˢ`, `∑'` — lexes as a generic
                 // symbol, and still binds variables.
                 SYMBOL,
-            ]),
+            ])
+            // `𝔼 y, f y` — expectation. Its head is a double-struck letter,
+            // which Lean lexes as an identifier rather than a symbol.
+            .or(ident_named(&["𝔼"])),
             binders(g),
             type_spec(g).or_not(),
             binder_pred.repeated().collect::<Vec<_>>(),
@@ -679,7 +697,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((
             // mathlib's `haveI`/`letI` introduce instances and are ordinary
             // identifiers, not keywords, but take the same shape.
-            choice((tok(KW_HAVE), tactic_name(&["haveI", "letI"]))),
+            choice((tok(KW_HAVE), ident_named(&["haveI", "letI"]))),
             let_lhs.clone().or_not(),
             type_spec(g).or_not(),
             tok(COLON_EQ),
@@ -883,6 +901,19 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         }),
         group((tok(PIPE_RIGHT_DOT), tok_in(&[IDENT, NUMBER])))
             .map(|(p, n)| (PIPE_PROJ, vec![p, n])),
+        // `R⟦X⟧` — power series over `R`. The same delimiters appear as a
+        // standalone quotient class, so adjacency is what marks this use.
+        group((
+            adjacent_tok(L_DOUBLE_BRACKET),
+            sep_list(term.clone(), COMMA).or_not(),
+            tok(R_DOUBLE_BRACKET),
+        ))
+        .map(|(l, items, r)| {
+            let mut kids = vec![l];
+            kids.extend(items.into_iter().flatten());
+            kids.push(r);
+            (INDEX, kids)
+        }),
         // `xs[i]`, `xs[i]?`, `xs[i]!`. Adjacency separates indexing from passing
         // a list as an argument, as in `f [a, b]` — the same distinction Lean
         // draws.

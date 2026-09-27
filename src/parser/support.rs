@@ -151,10 +151,12 @@ pub fn tactic_base_name(text: &str) -> &str {
     text.trim_end_matches(['?', '!'])
 }
 
-/// Matches an identifier used as a tactic name, given a set of accepted names.
+/// Matches an identifier whose text is one of `names`.
 ///
-/// Compares against [`tactic_base_name`], so `simp?` matches `"simp"`.
-pub fn tactic_name<'a>(
+/// Compares against [`tactic_base_name`], so `simp?` matches `"simp"`. Used for
+/// tactic names, and for the handful of notations that are identifiers rather
+/// than symbols — `𝔼 y, f y` among them.
+pub fn ident_named<'a>(
     names: &'static [&'static str],
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     any()

@@ -142,6 +142,18 @@ pub fn visit_term(term: &mut Term, v: &mut dyn Visitor) {
             v.binder(binder);
             v.term(predicate);
         }
+        Term::Index {
+            receiver,
+            args,
+            proof,
+            ..
+        } => {
+            v.term(receiver);
+            for a in args {
+                v.term(a);
+            }
+            opt_term(proof, v);
+        }
         Term::Proj { receiver, .. } | Term::Field { receiver, .. } => v.term(receiver),
         Term::Ascription { term, ty } => {
             v.term(term);

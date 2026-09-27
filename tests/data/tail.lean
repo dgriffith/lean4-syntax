@@ -112,6 +112,20 @@ example := AffineIndependent R ![A, B, C]
 /-- An index may carry its in-bounds proof. -/
 example := (p.cells[1]'p.one_lt).1
 
+/-
+Each bracketed form also appears as an *operand* below. A node kind the parser
+produces but the typed `Term` enum omits is invisible to lowering, and shows up
+only as a "missing operand" error — which needs the form to sit inside something
+that expects a term. Twice now that gap has been found this way rather than by
+reading the code.
+-/
+example := xs[n] + 1
+example := ![A, B] = ys
+example := (RatFunc k)⟦X⟧ → S
+example := ‖x‖ + 1
+example := Foo.{u} ≫ Bar.{v}
+example := s!"{n}" ++ t
+
 /-- A structure instance may draw on several sources. -/
 example := { (f : A), (g f : B) with c := h f }
 
