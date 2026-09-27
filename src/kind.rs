@@ -496,6 +496,7 @@ kinds! {
         APP,
         INFIX_TERM,
         PREFIX_TERM,
+        AS_PATTERN,
         POSTFIX_TERM,
         ARROW_TERM,
         DEP_ARROW,

@@ -717,6 +717,28 @@ impl Ctx {
                     Pat::Name(Name(tok_text(node, IDENT).unwrap_or_default()))
                 }
             }
+            // `m@(_ + 1)` binds `m` to the whole pattern as well as matching
+            // it. Without a case here the pattern is not an `ast::Term`, so an
+            // arm's pattern list comes back *empty* — silently, since nothing
+            // becomes `Opaque`.
+            AS_PATTERN => {
+                // `(AS_PATTERN (REF m) @ (PAREN_TERM …))` — the bound name is
+                // the receiver the trailer spliced in, and the pattern is what
+                // follows the `@`.
+                let mut parts = node.children();
+                let name = parts
+                    .next()
+                    .and_then(|n| tok_text(&n, IDENT))
+                    .unwrap_or_default();
+                let pat = match parts.next() {
+                    Some(n) => self.pat(&n),
+                    None => self.module.alloc_pat(Pat::Hole),
+                };
+                Pat::As {
+                    name: Name(name),
+                    pat,
+                }
+            }
             RCASES_TUPLE | ANON_CTOR | TUPLE => Pat::Tuple(self.sub_pats(node)),
             RCASES_ALT => Pat::Alt(self.sub_pats(node)),
             DECL_ID => Pat::Name(Name(tok_text(node, IDENT).unwrap_or_default())),

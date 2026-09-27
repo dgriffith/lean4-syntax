@@ -531,6 +531,8 @@ pub enum Pat {
     Alt(Vec<PatId>),
     /// A `match` pattern, which is syntactically a term.
     Term(TermId),
+    /// `m@(_ + 1)` — binds `name` to the whole of `pat` as well as matching it.
+    As { name: Name, pat: PatId },
     /// A pattern lowering did not model.
     Opaque(SyntaxNodePtr<Lean>),
 }

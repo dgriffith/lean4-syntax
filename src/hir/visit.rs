@@ -186,6 +186,7 @@ pub fn visit_pat(pat: &mut Pat, v: &mut dyn Visitor) {
             }
         }
         Pat::Term(term) => v.term(term),
+        Pat::As { pat, .. } => v.pat(pat),
     }
 }
 
