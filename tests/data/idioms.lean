@@ -223,3 +223,22 @@ alone would leave it to be inferred. -/
 example := { f := 1 : T }
 example := { f := 1, g := · : T }
 example := ⟨({ toLinearMap := ofClass f, norm_map' := · : E →ₗᵢ[𝕜] E' }.inner_map_map), h⟩
+
+/-- `⁻¹` is a token in its own right, so a symbol before it must not swallow it:
+`n !⁻¹` is the inverse of the factorial, not one operator called `!⁻¹`. -/
+example := n !⁻¹
+example := (n !⁻¹ : 𝕂) • ContinuousMultilinearMap.mkPiAlgebraFin 𝕂 n 𝔸
+
+/-- A `|` never takes a decoration, because it closes `|x|`: the multiplicative
+absolute value is `|x|` with `ₘ` applied to it. -/
+example : |x|ₘ ∈ H ↔ x ∈ H := by simp
+
+-- The forms that decoration exists for must keep working.
+example := f ⁻¹' s
+example := x⁻¹
+example := (f : E →ₗ[R] F)
+example := a =ᵐ[μ] b
+example := |x|
+def factorial_arms : Nat → Nat
+  | 0 => 1
+  | n + 1 => n

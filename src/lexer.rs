@@ -664,7 +664,17 @@ impl<'a> Lexer<'a> {
                     is_modifier(c)
                         || (!text.is_ascii() && matches!(c, '+' | '*' | '\'' | '!' | '_' | '>'))
                 };
-                if !kind.is_delimiter() && self.peek().is_some_and(decorates) {
+                // `⁻¹` is a token in its own right, so a symbol before it must not
+                // swallow it: `n !⁻¹` is the inverse of `n !`, not one operator
+                // called `!⁻¹`. (`⁻¹'`, the preimage, is the other way round —
+                // there `⁻¹` is the base and `'` decorates it, which still works,
+                // because the base came from the table above.)
+                //
+                // `|` is excluded for the same reason as a delimiter: it closes
+                // `|x|`, and `|ₘ` as one token loses the closing bar of `|x|ₘ`.
+                let starts_inv = self.starts_with("\u{207b}\u{00b9}");
+                let decorable = !kind.is_delimiter() && *kind != SyntaxKind::PIPE && !starts_inv;
+                if decorable && self.peek().is_some_and(decorates) {
                     self.bump_while(decorates);
                     return SyntaxKind::SYMBOL;
                 }
