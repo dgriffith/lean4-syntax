@@ -176,7 +176,30 @@ fn cannot_start_tactic(kind: SyntaxKind) -> bool {
     is_closer(kind)
         || matches!(
             kind,
-            SEMICOLON | SEQ_FOCUS | PIPE | COMMA | FAT_ARROW | COLON_EQ
+            SEMICOLON
+                | SEQ_FOCUS
+                | PIPE
+                | COMMA
+                | FAT_ARROW
+                | COLON_EQ
+                // These continue an enclosing *term*, so a `by` block inside
+                // one must end before them:
+                //
+                // ```lean
+                //   if h : u = v then by
+                //     subst u
+                //     exact {Walk.nil}
+                //   else ∅
+                // ```
+                //
+                // Without this the generic tactic rule reads `else ∅` as one
+                // more tactic and the `if` never finds its `else`. A tactic-mode
+                // `if h : c then tac else tac` is unaffected: its `then` and
+                // `else` are consumed by its own argument run, which does not
+                // consult this.
+                | KW_ELSE
+                | KW_THEN
+                | KW_IN
         )
 }
 
