@@ -279,7 +279,7 @@ fn with_clause<'a>(
             tok(PIPE),
             balanced_run(PATTERNS, ends_alt_pattern, true),
             tok(FAT_ARROW),
-            seq,
+            relax_indent(seq),
         )),
     );
     group((
@@ -518,7 +518,7 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             tok(PIPE),
             balanced_run(PATTERNS, ends_alt_pattern, true),
             tok(FAT_ARROW),
-            seq.clone(),
+            relax_indent(seq.clone()),
         )),
     );
     let generic = node(

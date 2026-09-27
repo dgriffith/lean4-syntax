@@ -129,6 +129,23 @@ example := s!"{n}" ++ t
 /-- A lambda may destructure a pair. -/
 example := xs.map fun (a, b) => a + b
 
+/-- An alternative'''s tactic block may start at the alternative'''s own column. -/
+example : True := by
+  induction k with
+  | zero => trivial
+  | succ pk hpk =>
+  obtain ⟨t, ht⟩ := h
+  · trivial
+
+/-- A let may name nothing, relying on the type. -/
+example :=
+  let : Algebra B S := f.toAlgebra
+  foo
+
+/-- Unique existence, and the monoidal unitor. -/
+example := ∃! p, CharP R p
+example := (λ_ M).hom
+
 /-- A structure instance may draw on several sources. -/
 example := { (f : A), (g f : B) with c := h f }
 

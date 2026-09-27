@@ -600,3 +600,40 @@ fn a_lambda_may_destructure_a_pair() {
     parse_clean("def f (x : Nat) (y : Nat) : Nat := x + y\n");
     parse_clean("variable (α β : Type) [Inhabited α]\n");
 }
+
+#[test]
+fn an_alternative_body_may_start_at_the_alternatives_column() {
+    // The block is anchored at the `|`, so requiring strictly greater
+    // indentation rejected what Lean accepts:
+    //
+    // ```lean
+    // | succ pk hpk =>
+    // obtain ⟨t, ht⟩ := h
+    // ```
+    let src = "example : True := by\n  induction k with\n  | zero => trivial\n  | succ pk hpk =>\n  obtain ⟨t, ht⟩ := h\n  · trivial\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, MATCH_ALT), 2, "{}", sexpr(&parse.syntax()));
+    // An indented body still works.
+    parse_clean(
+        "example : True := by\n  induction k with\n  | zero => trivial\n  | succ k ih =>\n    trivial\n",
+    );
+}
+
+#[test]
+fn a_let_may_name_nothing() {
+    // `let : Algebra B S := …` relies on the type alone.
+    parse_clean("def d :=\n  let : Algebra B S := f.toAlgebra\n  foo\n");
+    parse_clean("def d := let x := 1; x\n");
+    parse_clean("def d := let ⟨a, b⟩ := p; a\n");
+}
+
+#[test]
+fn decorated_quantifiers_and_unitors_are_single_tokens() {
+    // `∃!` is unique existence; `λ_` is a monoidal unitor, and `λ` cannot start
+    // an identifier since it opens a lambda.
+    parse_clean("theorem t : ∃! p, CharP R p := foo\n");
+    parse_clean("theorem t : (λ_ M).hom = f := foo\n");
+    // Neither disturbs the forms they resemble.
+    parse_clean("def d := fun x => x\n");
+    parse_clean("def d := (k - 1)!\n");
+}
