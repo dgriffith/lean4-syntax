@@ -135,3 +135,18 @@ example : ∀ l : List M, op l.prod = (l.map op).reverse.prod := by
   | nil => rfl
   | cons x xs ih =>
     rw [List.prod_cons, op_mul, ih]
+
+-- `{ tac; tac }` groups tactics, which is how mathlib focuses a goal after
+-- `refine ⟨?_, ?_⟩` and what `<;> { … }` applies to every goal.
+example : P := by { simp }
+example : P := by { intro h; exact h }
+example : P := by constructor <;> { simp [h] }
+example : P := by
+  refine ⟨?_, ?_⟩
+  { simp only [one_mul, inv_one, ← map_div, inv_inv] }
+  { exact ite_eq_right (by simpa using h hs) }
+
+-- A brace after `exact` or `refine` is still a structure instance, not a block.
+example : P := by exact { f := 1 }
+example : P := by refine { f := ?_ }
+example : P := by simp; exact { toFun := f }

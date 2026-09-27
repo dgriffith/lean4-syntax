@@ -596,6 +596,15 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             TACTIC_SEQ_BRACKETED,
             group((tok(L_PAREN), seq.clone(), tok(R_PAREN))),
         ),
+        // `{ tac; tac }` — the same thing in braces, which is how mathlib
+        // focuses a goal after `refine ⟨?_, ?_⟩` and what `<;> { … }` applies
+        // to every goal. Braces impose no column constraint on the tactics
+        // inside, so the sequence is `relax_indent`ed: the closing `}` is the
+        // delimiter, not the indentation.
+        node(
+            TACTIC_SEQ_BRACKETED,
+            group((tok(L_BRACE), relax_indent(seq.clone()), tok(R_BRACE))),
+        ),
         // `first | tac | tac`
         node(
             TACTIC_ALT,
