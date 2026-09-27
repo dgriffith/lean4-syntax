@@ -88,4 +88,35 @@ example : True := by
 example := s!"one of {", ".intercalate names}"
 example := "{"
 
+/-- Constructor docstrings come before the `|`, not after. -/
+inductive Reachable : (Fin 6 → Nat) → Prop
+  /-- The starting position. -/
+  | base : Reachable 1
+  /-- Remove a coin and add two. -/
+  | move {B i} (rB : Reachable B) (hi : i < 5) :
+      Reachable (B - single i 1)
+
+/-- A universe level may be an expression, not only a name. -/
+example : M.{w} R ⥤ A.{max u w} R where
+  obj := f
+
+/-- A measure-theoretic binder introduces its restriction with notation. -/
+example := ∀ᵐ x ∂volume.restrict (Icc 0 1), p x
+
+/-- Ascription with the type left to inference. -/
+example := (f (g r) (_ : M) :)
+
+/-- Matrix and vector notation. -/
+example := AffineIndependent R ![A, B, C]
+
+/-- An index may carry its in-bounds proof. -/
+example := (p.cells[1]'p.one_lt).1
+
+/-- A structure instance may draw on several sources. -/
+example := { (f : A), (g f : B) with c := h f }
+
+/-- Binders without a name. -/
+example := fun k ↦ have {p} (pp : p.Prime) : p = 2 := by simp
+  trivial
+
 end

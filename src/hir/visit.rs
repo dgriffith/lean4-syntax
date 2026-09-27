@@ -145,9 +145,15 @@ pub fn visit_term(term: &mut Term, v: &mut dyn Visitor) {
         Term::Proj { receiver, .. } | Term::Field { receiver, .. } => v.term(receiver),
         Term::Ascription { term, ty } => {
             v.term(term);
-            v.term(ty);
+            opt_term(ty, v);
         }
-        Term::Explicit(inner) | Term::Universes { term: inner, .. } => v.term(inner),
+        Term::Explicit(inner) => v.term(inner),
+        Term::Universes { term, levels } => {
+            v.term(term);
+            for level in levels {
+                v.term(level);
+            }
+        }
         Term::Calc { steps } => visit_calc(steps, v),
     }
 }

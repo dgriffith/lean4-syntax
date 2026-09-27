@@ -170,6 +170,7 @@ pub fn match_alts<'a>(
     let alt = node(
         MATCH_ALT,
         group((
+            tok(DOC_COMMENT).or_not(),
             tok(PIPE),
             node(PATTERNS, sep_list(term.clone(), COMMA)),
             tok(FAT_ARROW),
@@ -235,13 +236,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
                 tok(R_PAREN),
             )),
         ),
+        // `(e : T)`, and `(e :)` which ascribes with the expected type.
         node(
             TYPE_ASCRIPTION,
             group((
                 tok(L_PAREN),
                 term.clone(),
                 tok(COLON),
-                term.clone(),
+                term.clone().or_not(),
                 tok(R_PAREN),
             )),
         ),
@@ -400,6 +402,18 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // `![a, b, c]` — matrix and vector notation. Unambiguous, since a leading
+    // `!` is not otherwise a term.
+    let vec_lit = node(
+        ARRAY_LIT,
+        group((
+            tok(BANG),
+            tok(L_BRACKET),
+            comma_terms.clone().or_not(),
+            tok(R_BRACKET),
+        )),
+    );
+
     // `#[a, b]` — core Lean's array literal.
     let array_lit = node(
         ARRAY_LIT,
@@ -467,7 +481,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             STRUCT_INST,
             group((
                 tok(L_BRACE),
-                node(STRUCT_INST_SRC, group((term.clone(), tok(KW_WITH)))),
+                // Several sources are allowed: `{ a, b with f := e }`.
+                node(
+                    STRUCT_INST_SRC,
+                    group((sep_list(term.clone(), COMMA), tok(KW_WITH))),
+                ),
                 layout_block(STRUCT_FIELD_LIST, struct_field.clone(), &[COMMA], false).or_not(),
                 tok(R_BRACE),
             )),
@@ -551,10 +569,13 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
-    // `∃ x > 0, p x` — the relation is sugar for a conjunction.
+    // `∃ x > 0, p x` — the relation is sugar for a conjunction. `SYMBOL` is
+    // included because a measure-theoretic binder introduces its restriction
+    // with notation of its own: `∀ᵐ x ∂μ, p x`.
     let binder_pred = group((
         tok_in(&[
             LT, GT, LE, GE, LE_ASCII, GE_ASCII, NE, MEM, NOT_MEM, SUBSET_EQ, EQ, KW_IN, KW_WITH,
+            SYMBOL,
         ]),
         term.clone(),
     ));
@@ -606,6 +627,9 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     let let_lhs = choice((
         group((tok_in(&[IDENT, UNDERSCORE]), binders_opt(g)))
             .map(|(n, b)| Frag::Node(DECL_ID, vec![n, b])),
+        // `have {p} (pp : p.Prime) : p = 2 := …` introduces binders without
+        // naming the hypothesis.
+        binders(g),
         node(
             ANON_CTOR,
             group((
@@ -806,6 +830,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         abs_value,
         anon_ctor,
         array_lit,
+        vec_lit,
         card_term,
         list_lit,
         brace,
@@ -842,10 +867,12 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((adjacent_tok(DOT), tok(NUMBER))).map(|(d, n)| (PROJ, vec![d, n])),
         group((adjacent_tok(DOT), ident())).map(|(d, n)| (FIELD_ACCESS, vec![d, n])),
         // Universe arguments: `Foo.{u, v}`.
+        // Universe arguments: `Foo.{u, v}`, and also `Foo.{max u w}`, since a
+        // level is an expression rather than only a name.
         group((
             adjacent_tok(DOT),
             tok(L_BRACE),
-            sep_list(tok_in(&[IDENT, NUMBER, UNDERSCORE]), COMMA),
+            sep_list(term.clone(), COMMA),
             tok(R_BRACE),
         ))
         .map(|(d, l, levels, r)| {
@@ -863,13 +890,19 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             adjacent_tok(L_BRACKET),
             sep_list(term.clone(), COMMA).or_not(),
             tok(R_BRACKET),
-            tok_in(&[QUESTION, BANG]).or_not(),
+            // `xs[i]?`, `xs[i]!`, and `xs[i]'h` which supplies the in-bounds
+            // proof directly.
+            choice((
+                tok_in(&[QUESTION, BANG]).map(|t| vec![t]),
+                group((tok(TICK), term.clone())).map(|(t, p)| vec![t, p]),
+            ))
+            .or_not(),
         ))
         .map(|(l, items, r, marker)| {
             let mut kids = vec![l];
             kids.extend(items.into_iter().flatten());
             kids.push(r);
-            kids.extend(marker);
+            kids.extend(marker.into_iter().flatten());
             (INDEX, kids)
         }),
     ));

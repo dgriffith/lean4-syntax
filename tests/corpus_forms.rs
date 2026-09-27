@@ -533,3 +533,60 @@ fn an_interpolated_string_may_embed_a_string() {
     // A brace in an ordinary string is just a brace.
     parse_clean("def d := \"{\"\n");
 }
+
+#[test]
+fn constructor_docstrings_come_before_the_pipe() {
+    // Not after it, which is where this parser looked.
+    let src = "inductive R : Nat → Prop\n  /-- The base case. -/\n  | base : R 1\n  /-- The step. -/\n  | step {n} (h : R n) : R (n + 1)\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, CTOR), 2, "{}", sexpr(&parse.syntax()));
+}
+
+#[test]
+fn a_universe_level_may_be_an_expression() {
+    // `AlgCat.{max u w}` — levels are terms, not only names.
+    parse_clean("def d : M.{w} R ⥤ A.{max u w} R where\n  obj := f\n");
+    assert_eq!(count("def d := Foo.{u, v}\n", UNIV_ARGS), 1);
+}
+
+#[test]
+fn a_binder_restriction_may_be_notation() {
+    // `∀ᵐ x ∂μ, p x` — the measure-theoretic binders.
+    parse_clean("def d := ∀ᵐ x ∂volume.restrict (Icc 0 1), p x\n");
+}
+
+#[test]
+fn an_ascription_may_omit_its_type() {
+    // `(e :)` ascribes with the expected type.
+    assert_eq!(count("def d := (f x (_ : M) :)\n", TYPE_ASCRIPTION), 2);
+    assert_eq!(count("def d := (x : Nat)\n", TYPE_ASCRIPTION), 1);
+}
+
+#[test]
+fn vector_notation_and_indexed_proofs() {
+    assert_eq!(
+        count("def d := AffineIndependent R ![A, B, C]\n", ARRAY_LIT),
+        1
+    );
+    // `xs[i]'h` supplies the in-bounds proof.
+    assert_eq!(count("def d := (p.cells[1]'p.one_lt).1\n", INDEX), 1);
+}
+
+#[test]
+fn a_structure_instance_may_have_several_sources() {
+    assert_eq!(
+        count(
+            "def d := { (f : A), (g f : B) with c := h f }\n",
+            STRUCT_INST
+        ),
+        1
+    );
+    assert_eq!(count("def d := { s with x := 1 }\n", STRUCT_INST), 1);
+}
+
+#[test]
+fn a_have_may_introduce_binders_without_a_name() {
+    parse_clean("def d := fun k ↦ have {p} (pp : p.Prime) : p = 2 := by simp\n  trivial\n");
+    // And the named form still works.
+    parse_clean("def d := have h : p := hp\n  h\n");
+}

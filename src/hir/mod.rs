@@ -442,8 +442,9 @@ pub enum Term {
     Proj { receiver: TermId, index: u32 },
     /// `e.field` and `e |>.field`
     Field { receiver: TermId, name: Name },
-    /// `(e : T)`
-    Ascription { term: TermId, ty: TermId },
+    /// `(e : T)`, and `(e :)` which ascribes with the expected type — so the
+    /// type is absent rather than merely unwritten.
+    Ascription { term: TermId, ty: Option<TermId> },
     /// `@f`
     Explicit(TermId),
     /// `·`
@@ -453,7 +454,10 @@ pub enum Term {
     /// A curated delimiter pair: `‖x‖`, `⌊x⌋`, `⟪x, y⟫`.
     Bracketed { open: Name, parts: Vec<TermId> },
     /// `Foo.{u, v}` — a term with explicit universe arguments.
-    Universes { term: TermId, levels: Vec<Name> },
+    ///
+    /// The levels are terms rather than names, because a level may be an
+    /// expression: `AlgCat.{max u w}`.
+    Universes { term: TermId, levels: Vec<TermId> },
     /// `calc a = b := h …`
     Calc { steps: Vec<CalcStep> },
     /// Syntax lowering did not interpret.
