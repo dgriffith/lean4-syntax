@@ -378,6 +378,8 @@ kinds! {
         BIG_OPLUS = "\u{2a01}",       // ⨁
         BIG_OTIMES = "\u{2a02}",      // ⨂
         INTEGRAL = "\u{222b}",        // ∫
+        ISO_TRANS = "\u{226a}\u{226b}", // ≪≫
+        LL = "\u{226a}",              // ≪
         GG = "\u{226b}",              // ≫  (27345 uses)
         GGG = "\u{22d9}",             // ⋙
         LONG_ARROW = "\u{27f6}",      // ⟶  (24803 uses)
@@ -518,6 +520,7 @@ kinds! {
         STRUCT_INST_FIELD,
         LIST_LIT,
         ARRAY_LIT,
+        INDEX,
         SET_LIT,
         RANGE_LIT,
         UNIV_ARGS,

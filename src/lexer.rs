@@ -290,14 +290,59 @@ impl<'a> Lexer<'a> {
     }
 
     /// `"..."` with Lean's escape sequences.
+    ///
+    /// An interpolated string — one written `s!"…"`, `m!"…"` and so on — may
+    /// embed terms in `{…}`, and those terms may contain strings of their own:
+    ///
+    /// ```lean
+    /// s!"one of {", ".intercalate names}"
+    /// ```
+    ///
+    /// Terminating at the first `"` cuts that in half, so brace depth is tracked
+    /// and a nested literal is scanned past. Depth is only tracked for an
+    /// interpolated string, because `"{"` is a perfectly good ordinary one and
+    /// tracking it there would never terminate.
     fn string(&mut self) -> SyntaxKind {
+        let interpolated = self.after_interpolation_prefix();
         self.bump(); // opening quote
+        let mut depth = 0usize;
         loop {
             match self.peek() {
-                None | Some('\n') => return SyntaxKind::LEX_ERROR, // unterminated
-                Some('"') => {
+                None => return SyntaxKind::LEX_ERROR, // unterminated
+                // A newline ends an unterminated string, but an embedded term
+                // may legitimately span lines.
+                Some('\n') if depth == 0 => return SyntaxKind::LEX_ERROR,
+                Some('"') if depth == 0 => {
                     self.bump();
                     return SyntaxKind::STRING;
+                }
+                Some('"') => {
+                    // A string inside an embedded term.
+                    self.bump();
+                    loop {
+                        match self.peek() {
+                            None => return SyntaxKind::LEX_ERROR,
+                            Some('\\') => {
+                                self.bump();
+                                self.bump();
+                            }
+                            Some('"') => {
+                                self.bump();
+                                break;
+                            }
+                            Some(_) => {
+                                self.bump();
+                            }
+                        }
+                    }
+                }
+                Some('{') if interpolated => {
+                    depth += 1;
+                    self.bump();
+                }
+                Some('}') if interpolated && depth > 0 => {
+                    depth -= 1;
+                    self.bump();
                 }
                 Some('\\') => {
                     self.bump();
@@ -308,6 +353,18 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+    }
+
+    /// True if this string directly follows an identifier ending in `!`, which
+    /// is how Lean marks interpolation.
+    fn after_interpolation_prefix(&self) -> bool {
+        self.out
+            .iter()
+            .rev()
+            .find(|t| !t.kind.is_trivia())
+            .is_some_and(|t| {
+                t.kind == SyntaxKind::IDENT && t.text.ends_with('!') && t.end() as usize == self.pos
+            })
     }
 
     /// Checks for `r"` or `r#*"` without consuming, so a bare `r` stays an ident.
@@ -368,9 +425,21 @@ impl<'a> Lexer<'a> {
         }
         self.bump_while(|c| c.is_ascii_digit());
         let mut scientific = false;
+        // A number that directly follows a `.` is a projection index, so it
+        // takes no fractional part of its own: `x.2.2` is two projections, not
+        // a projection by the float `2.2`.
+        let after_dot = self
+            .out
+            .iter()
+            .rev()
+            .find(|t| !t.kind.is_trivia())
+            .is_some_and(|t| t.kind == SyntaxKind::DOT);
         // A `.` only continues the literal if a digit follows; `1.foo` is a
         // projection and `1..2` is a range.
-        if self.peek() == Some('.') && self.peek_nth(1).is_some_and(|c| c.is_ascii_digit()) {
+        if !after_dot
+            && self.peek() == Some('.')
+            && self.peek_nth(1).is_some_and(|c| c.is_ascii_digit())
+        {
             scientific = true;
             self.bump();
             self.bump_while(|c| c.is_ascii_digit());
@@ -622,6 +691,15 @@ mod tests {
     }
 
     #[test]
+    fn a_number_after_a_dot_is_a_projection_index() {
+        // `x.2.2` reaches a nested field; reading `2.2` as a float broke it.
+        assert_eq!(dump("x.2.2"), "IDENT(x) DOT(.) NUMBER(2) DOT(.) NUMBER(2)");
+        // Floats elsewhere are unaffected.
+        assert_eq!(dump("1.5"), "SCIENTIFIC(1.5)");
+        assert_eq!(dump("f 1.5"), "IDENT(f) WHITESPACE( ) SCIENTIFIC(1.5)");
+    }
+
+    #[test]
     fn numbers_cover_lean_forms() {
         assert_eq!(dump("0xff"), "NUMBER(0xff)");
         assert_eq!(dump("0b1010"), "NUMBER(0b1010)");
@@ -635,6 +713,23 @@ mod tests {
         assert_eq!(dump("α"), "IDENT(α)");
         assert_eq!(dump("Σ"), "SIGMA(Σ)");
         assert_eq!(dump("γ₁"), "IDENT(γ₁)");
+    }
+
+    #[test]
+    fn an_interpolated_string_may_embed_a_string() {
+        // The embedded term is lexed as part of the literal, so a string inside
+        // it must not terminate the outer one.
+        assert_eq!(
+            dump(r#"s!"a {", ".intercalate xs} b""#),
+            r#"IDENT(s!) STRING("a {", ".intercalate xs} b")"#
+        );
+        // A brace in an ordinary string is just a brace.
+        assert_eq!(dump(r#""{""#), r#"STRING("{")"#);
+        // And interpolation needs the `!` to be adjacent.
+        assert_eq!(
+            dump(r#"s !"{""#),
+            r#"IDENT(s) WHITESPACE( ) BANG(!) STRING("{")"#
+        );
     }
 
     #[test]

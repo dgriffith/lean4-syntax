@@ -355,6 +355,30 @@ pub fn balanced_run<'a>(
     stop: fn(SyntaxKind) -> bool,
     allow_empty: bool,
 ) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    run(kind, stop, allow_empty, true)
+}
+
+/// A balanced run for a region that is *already* inside brackets, where Lean
+/// imposes no column constraint.
+///
+/// `@[to_additive` followed by its argument on the next line at column 0 is
+/// legal, and a dedent-terminated run rejects it: the enclosing bracket was
+/// consumed before the run started, so the run sees depth zero and applies a
+/// rule that does not apply.
+pub fn bracketed_run<'a>(
+    kind: SyntaxKind,
+    stop: fn(SyntaxKind) -> bool,
+    allow_empty: bool,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    run(kind, stop, allow_empty, false)
+}
+
+fn run<'a>(
+    kind: SyntaxKind,
+    stop: fn(SyntaxKind) -> bool,
+    allow_empty: bool,
+    stop_on_dedent: bool,
+) -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     custom(move |inp: &mut InputRef<'a, '_, In<'a>, Extra<'a>>| {
         let min = *inp.ctx();
         let start = inp.cursor();
@@ -363,7 +387,7 @@ pub fn balanced_run<'a>(
         while let Some(t) = inp.peek() {
             if depth.is_empty() {
                 // Dedent ends the run: the token belongs to an outer block.
-                if t.col <= min {
+                if stop_on_dedent && t.col <= min {
                     break;
                 }
                 if stop(t.kind) || is_closer(t.kind) {

@@ -280,6 +280,26 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // A notation character with no specific rule: usable as an atom, so `∞`,
     // `⊤`, `𝟙 X` and the rest of the 292-character tail parse without being
     // enumerated one by one.
+    // `f ↑m ↑n` — a coercion in argument position. The operator table handles
+    // `↑` at the head of a term, but application arguments come from the atom
+    // set, so a coercion needs to be an atom of its own too.
+    let coerced = recursive(|coerced| {
+        node(
+            PREFIX_TERM,
+            group((
+                tok_in(&[UP_ARROW, COE_FUN, COE_SORT]),
+                choice((
+                    coerced,
+                    node(REF, ident()),
+                    node(
+                        PAREN_TERM,
+                        group((tok(L_PAREN), term.clone(), tok(R_PAREN))),
+                    ),
+                )),
+            )),
+        )
+    });
+
     // Curated constants, usable wherever a term is — including as an
     // application argument.
     let constant_term = node(
@@ -345,6 +365,31 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // `#s` — cardinality. Ordered after `array_lit` in the atom list so that
     // `#[1, 2]` stays an array literal rather than `#` applied to a list.
     let card_term = node(PREFIX_TERM, group((tok(HASH), term.clone())));
+
+    // `|x|` — absolute value. This is the one delimiter that collides with
+    // structural syntax: `|` also separates match alternatives, `rcases`
+    // patterns and `first | …` branches.
+    //
+    // It is nonetheless safe here, for two reasons. Alternative separators are
+    // matched by an explicit `tok(PIPE)` in their own rules, never through the
+    // term parser. And a wrong attempt fails cheaply: the required closing `|`
+    // means that in
+    //
+    // ```lean
+    // | a => f
+    // | b => g
+    // ```
+    //
+    // reading `| b` as an absolute value dies at the `=>` where the closing `|`
+    // should be, and the application stops as it should.
+    //
+    // The one shape that would genuinely be ambiguous is pattern alternation,
+    // `| a | b => e`, which this parser does not support yet. Supporting it will
+    // need this rule revisited.
+    let abs_value = node(
+        NOTATION_BRACKET,
+        group((tok(PIPE), term.clone(), tok(PIPE))),
+    );
 
     let anon_ctor = node(
         ANON_CTOR,
@@ -509,7 +554,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // `∃ x > 0, p x` — the relation is sugar for a conjunction.
     let binder_pred = group((
         tok_in(&[
-            LT, GT, LE, GE, LE_ASCII, GE_ASCII, NE, MEM, NOT_MEM, SUBSET_EQ, EQ, KW_IN,
+            LT, GT, LE, GE, LE_ASCII, GE_ASCII, NE, MEM, NOT_MEM, SUBSET_EQ, EQ, KW_IN, KW_WITH,
         ]),
         term.clone(),
     ));
@@ -541,7 +586,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             ]),
             binders(g),
             type_spec(g).or_not(),
-            binder_pred.or_not(),
+            binder_pred.repeated().collect::<Vec<_>>(),
             tok(COMMA),
             term.clone(),
         )),
@@ -758,6 +803,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         quoted,
         paren,
         notation_bracket,
+        abs_value,
         anon_ctor,
         array_lit,
         card_term,
@@ -771,6 +817,7 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         cdot,
         hole,
         ellipsis,
+        coerced,
         reference,
         constant_term,
     ))
@@ -786,6 +833,12 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // Each trailer yields the node kind to build and the tokens after the
     // receiver, so the fold can splice the receiver in as the first child.
     let trailer = choice((
+        // `ℤˣ`, `sᶜ`, `x⁻¹`, `Kᗮ` — postfix notation binds tighter than
+        // application, so it attaches to the argument rather than to the whole
+        // application. The operator-table entries cover the same forms applied
+        // to a complete term.
+        tok_in(&[MODIFIER, INV]).map(|m| (POSTFIX_TERM, vec![m])),
+        adjacent_tok(SYMBOL).map(|m| (POSTFIX_TERM, vec![m])),
         group((adjacent_tok(DOT), tok(NUMBER))).map(|(d, n)| (PROJ, vec![d, n])),
         group((adjacent_tok(DOT), ident())).map(|(d, n)| (FIELD_ACCESS, vec![d, n])),
         // Universe arguments: `Foo.{u, v}`.
@@ -803,6 +856,22 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         }),
         group((tok(PIPE_RIGHT_DOT), tok_in(&[IDENT, NUMBER])))
             .map(|(p, n)| (PIPE_PROJ, vec![p, n])),
+        // `xs[i]`, `xs[i]?`, `xs[i]!`. Adjacency separates indexing from passing
+        // a list as an argument, as in `f [a, b]` — the same distinction Lean
+        // draws.
+        group((
+            adjacent_tok(L_BRACKET),
+            sep_list(term.clone(), COMMA).or_not(),
+            tok(R_BRACKET),
+            tok_in(&[QUESTION, BANG]).or_not(),
+        ))
+        .map(|(l, items, r, marker)| {
+            let mut kids = vec![l];
+            kids.extend(items.into_iter().flatten());
+            kids.push(r);
+            kids.extend(marker);
+            (INDEX, kids)
+        }),
     ));
 
     fn splice(receiver: Frag, (kind, rest): (SyntaxKind, Vec<Frag>)) -> Frag {
@@ -863,13 +932,14 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         infix(right(67), tok_in(&[DOUBLE_COLON]), mk_infix),
         infix(
             left(70),
-            tok_in(&[STAR, SLASH, PERCENT, INTER, INF]),
+            tok_in(&[STAR, SLASH, PERCENT, INTER, INF, BACKSLASH]),
             mk_infix,
         ),
         infix(right(75), tok_in(&[CARET]), mk_infix),
         infix(right(90), tok_in(&[COMPOSE]), mk_infix),
         // Curated from the mathlib census, with Lean's own precedences.
-        infix(right(80), tok_in(&[GG, GGG]), mk_infix),
+        infix(right(80), tok_in(&[GG, GGG, ISO_TRANS]), mk_infix),
+        infix(left(50), tok_in(&[LL]), mk_infix),
         // `f  s` is Set.image, infixl:80 in mathlib.
         infix(left(80), tok_in(&[IMAGE]), mk_infix),
         infix(right(73), tok_in(&[BULLET]), mk_infix),
@@ -898,7 +968,11 @@ pub fn term<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     ];
 
     // Modifier runs are postfix at maximal precedence: `sᶜ`, `Xᵒᵖ`, `‖x‖₊`.
-    let postfixes = vec![postfix(1000, tok_in(&[INV, MODIFIER]), mk_postfix)];
+    // `(card α - 1)!` and `n !` — factorial. A `!` directly after an identifier
+    // is part of that identifier, so this only applies after a bracket or across
+    // whitespace, and never competes with `!b` for boolean negation, which the
+    // prefix entry takes at the head of a term.
+    let postfixes = vec![postfix(1000, tok_in(&[INV, MODIFIER, BANG]), mk_postfix)];
 
     // Operators that may carry a bracketed parameter. `⊗` gets Lean's
     // precedence; `SYMBOL` — every notation character without a rule of its
