@@ -590,3 +590,13 @@ fn a_have_may_introduce_binders_without_a_name() {
     // And the named form still works.
     parse_clean("def d := have h : p := hp\n  h\n");
 }
+
+#[test]
+fn a_lambda_may_destructure_a_pair() {
+    // `fun (a, b) => …`. A parenthesised binder is tried first, so `(x : T)` is
+    // unaffected — it only falls through here at the comma.
+    parse_clean("def d := xs.map fun (a, b) => a + b\n");
+    parse_clean("def d := xs.map fun ⟨a, b⟩ => a + b\n");
+    parse_clean("def f (x : Nat) (y : Nat) : Nat := x + y\n");
+    parse_clean("variable (α β : Type) [Inhabited α]\n");
+}
