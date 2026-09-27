@@ -637,3 +637,27 @@ fn decorated_quantifiers_and_unitors_are_single_tokens() {
     parse_clean("def d := fun x => x\n");
     parse_clean("def d := (k - 1)!\n");
 }
+
+#[test]
+fn a_where_clause_may_introduce_no_fields() {
+    // `instance : (forget₂ A B).Braided where` is satisfied entirely by
+    // defaults.
+    parse_clean("instance : (forget A B).Braided where\n\ninstance other : C := foo\n");
+    // And one with fields still works.
+    parse_clean("instance : Add Nat where\n  add a b := a + b\n");
+}
+
+#[test]
+fn a_docstring_may_precede_a_command_that_does_not_take_one() {
+    // mathlib writes these ahead of `set_option`, which has no docstring slot
+    // of its own.
+    let src = "#adaptation_note\n/-- note -/\nset_option backward.types false in\n/-- doc -/\n@[simps!]\ndef op : A ≃ B where\n  toFun := f\n";
+    let parse = parse_clean(src);
+    assert_eq!(count(src, DOCUMENTED_CMD), 1, "{}", sexpr(&parse.syntax()));
+
+    // A declaration still keeps its docstring inside its own modifiers rather
+    // than being wrapped.
+    let src = "/-- doc -/\ndef f := 1\n";
+    assert_eq!(count(src, DOCUMENTED_CMD), 0);
+    assert_eq!(count(src, DECL_MODIFIERS), 1);
+}

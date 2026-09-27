@@ -184,7 +184,9 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             DECL_BODY,
             group((
                 tok(KW_WHERE),
-                layout_block(STRUCT_FIELD_LIST, where_field.clone(), &[], true),
+                // `instance : (forget₂ A B).Braided where` introduces no fields:
+                // the instance is satisfied entirely by defaults.
+                layout_block(STRUCT_FIELD_LIST, where_field.clone(), &[], true).or_not(),
             )),
         ),
         // Pattern-matching equations: `def f : Nat → Nat | 0 => 1 | n+1 => n`
@@ -645,5 +647,24 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
     // Declarations are tried first: they are the only forms that begin with
     // modifiers, and `@[…]` or `private` must not be mistaken for anything
     // else. The generic fallback is last.
-    choice((declarations, simple_commands, meta_commands, unknown_cmd)).boxed()
+    // mathlib writes a docstring ahead of commands that do not use one:
+    //
+    // ```lean
+    // #adaptation_note
+    // /-- `respectTransparency.types true` changes the signature -/
+    // set_option backward.isDefEq.respectTransparency.types false in
+    // ```
+    //
+    // Tried last, so a declaration still keeps its own docstring inside its
+    // modifiers rather than being wrapped here.
+    let documented = node(DOCUMENTED_CMD, group((tok(DOC_COMMENT), cmd.clone())));
+
+    choice((
+        declarations,
+        simple_commands,
+        meta_commands,
+        unknown_cmd,
+        documented,
+    ))
+    .boxed()
 }
