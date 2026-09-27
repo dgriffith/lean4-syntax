@@ -77,3 +77,12 @@ theorem calc_demo (a b c : Nat) (h1 : a = b) (h2 : b = c) : a = c :=
     _ = c := h2
 
 end Demo
+
+/-- `class inductive` has a constructor list, not a field list. -/
+class inductive IsGCDMonoid (α : Type*) [CommMonoidWithZero α] : Prop
+  | intro : GCDMonoid α → IsGCDMonoid α
+
+class inductive Reachable (α : Type) : Prop where
+  /-- The starting position. -/
+  | base : Reachable α
+  | step : Reachable α → Reachable α

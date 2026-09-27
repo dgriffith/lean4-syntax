@@ -300,6 +300,28 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         group((tok(KW_EXTENDS), sep_list(term.clone(), COMMA))),
     );
 
+    // The docstring comes *before* the `|`:
+    //
+    // ```lean
+    // inductive Reachable : (Fin 6 → ℕ) → Prop
+    //   /-- The starting position -/
+    //   | base : Reachable 1
+    // ```
+    let ctor = node(
+        CTOR,
+        group((
+            tok(DOC_COMMENT).or_not(),
+            tok(PIPE),
+            tok(DOC_COMMENT).or_not(),
+            tok_in(&[KW_PRIVATE, KW_PROTECTED, KW_PUBLIC])
+                .repeated()
+                .collect::<Vec<_>>(),
+            tok(IDENT),
+            binders_opt(g),
+            type_spec(g).or_not(),
+        )),
+    );
+
     let structure_decl = node(
         STRUCTURE,
         group((
@@ -323,6 +345,25 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         )),
     );
 
+    // `class inductive` declares constructors, not fields, so its body is an
+    // `inductive` body. Tried before `class_decl`, whose body is a field list:
+    // without this, `class inductive IsGCDMonoid … : Prop` parsed, then the
+    // following `| intro : …` had nowhere to go.
+    let class_inductive_decl = node(
+        CLASS_DECL,
+        group((
+            modifiers.clone(),
+            tok(KW_CLASS),
+            tok(KW_INDUCTIVE),
+            decl_id.clone(),
+            binders_opt(g),
+            type_spec(g).or_not(),
+            tok(KW_WHERE).or_not(),
+            layout_block(CTOR_LIST, ctor.clone(), &[], false).or_not(),
+            deriving.clone().or_not(),
+        )),
+    );
+
     // A `class` is a structure, except that `class inductive` also exists.
     let class_decl = node(
         CLASS_DECL,
@@ -342,28 +383,6 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             ))
             .or_not(),
             deriving.clone().or_not(),
-        )),
-    );
-
-    // The docstring comes *before* the `|`:
-    //
-    // ```lean
-    // inductive Reachable : (Fin 6 → ℕ) → Prop
-    //   /-- The starting position -/
-    //   | base : Reachable 1
-    // ```
-    let ctor = node(
-        CTOR,
-        group((
-            tok(DOC_COMMENT).or_not(),
-            tok(PIPE),
-            tok(DOC_COMMENT).or_not(),
-            tok_in(&[KW_PRIVATE, KW_PROTECTED, KW_PUBLIC])
-                .repeated()
-                .collect::<Vec<_>>(),
-            tok(IDENT),
-            binders_opt(g),
-            type_spec(g).or_not(),
         )),
     );
 
@@ -595,6 +614,7 @@ pub fn command<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
         example_decl,
         instance_decl,
         structure_decl,
+        class_inductive_decl,
         class_decl,
         inductive_decl,
     ))
