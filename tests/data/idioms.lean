@@ -256,3 +256,17 @@ example := if h : i < n then a else b
 example := match h : e with | 0 => a
 example (x : T) [inst : Monad m] : P := by simp
 example := by induction h : e with | zero => simp
+
+/-- Keywords are not reserved as field names, and mathlib leans on it. This only
+comes up after a closing bracket: the lexer folds `x.rec` into one identifier. -/
+example := (h : T).module S
+example := (h : T).forall
+example := (f x).exists
+example := xs[i].rec
+example := (h).from
+example := x |>.then f
+example := { homEquiv (Y := Y) with map_add' _ _ := rfl : (X ⟶ Y) ≃+ (X →L[S] Y) }.module S
+
+/-- A field in a `with`-update may take its own arguments. -/
+example := { f with g _ _ := rfl }
+example := { f with g := 1 }

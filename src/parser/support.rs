@@ -180,6 +180,17 @@ pub fn ident<'a>() -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
     tok(SyntaxKind::IDENT)
 }
 
+/// A field name after a `.`.
+///
+/// Keywords are not reserved there, and mathlib leans on it: `.forall` (783
+/// uses), `.exists` (772), `.rec` (493), `.from`, `.def`, `.module`, `.then`,
+/// `.end`. This only comes up after a closing bracket — the lexer folds `x.rec`
+/// into one identifier token, since an identifier absorbs a `.` followed by an
+/// identifier start, so it is `(h : T).module` and `xs[i].forall` that need it.
+pub fn field_name<'a>() -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
+    any_tok_if(|k| k == SyntaxKind::IDENT || k.is_keyword())
+}
+
 /// Matches any single token. Used by rules that deliberately keep a region
 /// uninterpreted, and by error recovery.
 pub fn any_tok<'a>() -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
