@@ -152,6 +152,13 @@ const COMBINATOR_LIKE: &[&str] = &[
 // ---- Stop conditions -------------------------------------------------------
 
 /// Tokens that end a tactic's argument run at bracket depth zero.
+///
+/// A comma is deliberately *not* here, even though it should be: in
+/// `refine ⟨by simp, by simp⟩` the inner `by` block ought to end at the comma
+/// and instead runs on. Adding `COMMA` fixes that nesting but costs 2.6% of the
+/// mathlib clean-parse rate through failures that do not reproduce in
+/// isolation, so it needs its own investigation rather than riding along with
+/// unrelated work.
 fn ends_tactic(kind: SyntaxKind) -> bool {
     matches!(kind, SEMICOLON | SEQ_FOCUS)
 }
@@ -442,7 +449,11 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             )),
             rcases_pat(g).or_not(),
             col_gt().ignore_then(binders(g)).or_not(),
-            type_spec(g).or_not(),
+            // `suffices h : T from e` names the statement; `suffices T from e`
+            // does not, so a bare term has to be accepted as the statement.
+            // Wrapped in `TYPE_SPEC` so it is reachable the same way either
+            // form is.
+            choice((type_spec(g), node(TYPE_SPEC, term.clone()))).or_not(),
             group((tok(COLON_EQ), term.clone())).or_not(),
             group((tok(KW_FROM), term.clone())).or_not(),
             group((tok(KW_WITH), tok_in(&[IDENT, UNDERSCORE]))).or_not(),
