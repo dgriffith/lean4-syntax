@@ -219,6 +219,18 @@ where
             tok(DOC_COMMENT).or_not(),
             tok(PIPE),
             node(PATTERNS, sep_list(term.clone(), COMMA)),
+            // `| ⊤, ⊤ | ⊤, (b : α) => le_rfl` — several pattern groups may share
+            // one body.
+            //
+            // This needs no `col_gt` guard, unusually for a `repeated()` that
+            // can cross a line break. Every alternative has a `=>`, so after a
+            // pattern group the next token is either that `=>`, which ends the
+            // patterns, or a `|`, which can only be another group of *this*
+            // alternative — the following alternative's `|` is unreachable
+            // until this one's body has been parsed.
+            group((tok(PIPE), node(PATTERNS, sep_list(term.clone(), COMMA))))
+                .repeated()
+                .collect::<Vec<_>>(),
             tok(FAT_ARROW),
             body,
         )),
