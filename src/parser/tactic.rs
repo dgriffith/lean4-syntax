@@ -195,7 +195,10 @@ fn location<'a>() -> impl Parser<'a, In<'a>, Frag, Extra<'a>> + Clone {
             tok(KW_AT),
             choice((
                 tok(STAR).map(|t| vec![t]),
-                tok_in(&[IDENT, TURNSTILE, TURNSTILE_ASCII])
+                // The guard matters: without it, `at hA` followed by `rw [a]`
+                // on the next line takes `rw` as another hypothesis.
+                col_gt()
+                    .ignore_then(tok_in(&[IDENT, TURNSTILE, TURNSTILE_ASCII]))
                     .repeated()
                     .at_least(1)
                     .collect::<Vec<_>>(),
@@ -426,7 +429,11 @@ pub fn tactic_seq<'a>(g: &Grammar<'a>) -> BoxedP<'a, Frag> {
             // `induction n generalizing m` revert extra hypotheses first.
             group((
                 tok(KW_GENERALIZING),
-                tok(IDENT).repeated().at_least(1).collect::<Vec<_>>(),
+                col_gt()
+                    .ignore_then(tok(IDENT))
+                    .repeated()
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
             ))
             .map(|(kw, ids)| {
                 let mut kids = vec![kw];
